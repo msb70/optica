@@ -96,7 +96,8 @@ for t in AUTH_TABLES:
     includes.append(fn)
 for t in STORAGE_TABLES:
     name = {'buckets':'buckets','files':'files','virus':'virus'}[t]
-    doc = {'table': {'name': t, 'schema': 'storage'}, 'configuration': {'custom_name': name, 'custom_root_fields': root_fields(name)}}
+    rf = root_fields(name) if t != 'virus' else {'delete':'deleteViruses','delete_by_pk':'deleteVirus','insert':'insertViruses','insert_one':'insertVirus','select':'viruses','select_aggregate':'virusesAggregate','select_by_pk':'virus','update':'updateViruses','update_by_pk':'updateVirus'}
+    doc = {'table': {'name': t, 'schema': 'storage'}, 'configuration': {'custom_name': name, 'custom_root_fields': rf}}
     if t == 'files':
         doc['object_relationships'] = [{'name':'bucket','using':{'foreign_key_constraint_on':'bucket_id'}}]
     if t == 'buckets':

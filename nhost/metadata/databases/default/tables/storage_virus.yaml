@@ -4,12 +4,12 @@ table:
 configuration:
   custom_name: virus
   custom_root_fields:
-    delete: deleteVirus
-    delete_by_pk: deleteViru
-    insert: insertVirus
-    insert_one: insertViru
-    select: virus
-    select_aggregate: virusAggregate
-    select_by_pk: viru
-    update: updateVirus
-    update_by_pk: updateViru
+    delete: deleteViruses
+    delete_by_pk: deleteVirus
+    insert: insertViruses
+    insert_one: insertVirus
+    select: viruses
+    select_aggregate: virusesAggregate
+    select_by_pk: virus
+    update: updateViruses
+    update_by_pk: updateVirus

@@ -356,7 +356,8 @@ ins('stock_counts', id=sc_id, branch_id=U('br-obarrio'), staff_id=STAFF[0]['id']
 
 # ---------------- Emitir SQL ----------------
 ORDER = ['companies','branches','staff','products','customers','customer_notes','appointments','exams','vouchers','cash_sessions','cash_movements','quotes','quote_items','sales','sale_items','payments','stock_movements','lab_orders','lab_order_events','rmas','rma_events','intercompany_rules','intercompany_docs','intercompany_items','transfers','transfer_items','stock_counts']
-out = ['-- Datos semilla Optilux (generado por scripts/gen_seed.py — determinista, seed=42)', 'SET session_replication_role = replica;  -- desactiva triggers de auditoría/cola durante la carga', '']
+TRIG_TABLES = ['exams','stock_movements','payments','sales','customers','quotes','intercompany_docs','cash_sessions','lab_orders']
+out = ['-- Datos semilla Optilux (generado por scripts/gen_seed.py — determinista, seed=42)', '-- Desactiva triggers de usuario durante la carga (no requiere superusuario)'] + [f'ALTER TABLE public.{t} DISABLE TRIGGER USER;' for t in TRIG_TABLES] + ['']
 for t in ORDER:
     if t not in rows: continue
     groups = {}
@@ -366,7 +367,7 @@ for t in ORDER:
         vals = [ '(' + ', '.join(q(kw[c]) for c in cols) + ')' for kw in lst ]
         out.append(',\n'.join(vals) + ';')
     out.append('')
-out.append('SET session_replication_role = DEFAULT;')
+out.extend([f'ALTER TABLE public.{t} ENABLE TRIGGER USER;' for t in TRIG_TABLES])
 out.append('''
 -- Recalcular agregados que normalmente mantienen los triggers
 INSERT INTO public.stock (product_id, branch_id, qty)

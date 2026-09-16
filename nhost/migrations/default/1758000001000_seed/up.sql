@@ -1,5 +1,14 @@
 -- Datos semilla Optilux (generado por scripts/gen_seed.py — determinista, seed=42)
-SET session_replication_role = replica;  -- desactiva triggers de auditoría/cola durante la carga
+-- Desactiva triggers de usuario durante la carga (no requiere superusuario)
+ALTER TABLE public.exams DISABLE TRIGGER USER;
+ALTER TABLE public.stock_movements DISABLE TRIGGER USER;
+ALTER TABLE public.payments DISABLE TRIGGER USER;
+ALTER TABLE public.sales DISABLE TRIGGER USER;
+ALTER TABLE public.customers DISABLE TRIGGER USER;
+ALTER TABLE public.quotes DISABLE TRIGGER USER;
+ALTER TABLE public.intercompany_docs DISABLE TRIGGER USER;
+ALTER TABLE public.cash_sessions DISABLE TRIGGER USER;
+ALTER TABLE public.lab_orders DISABLE TRIGGER USER;
 
 INSERT INTO public.companies (id, code, legal_name, trade_name, tax_id, invoice_prefix, zoho_org_id, tax_rate, next_invoice_no) VALUES
 ('50661539-84dc-59d0-8203-a0ae0a6bbe6b', 'OPTILUX', 'Optilux S.A.', 'Optilux', '155612345-2-2019 DV 45', 'OPX', '7000123001', 7, 1),
@@ -29153,7 +29162,15 @@ INSERT INTO public.transfer_items (transfer_id, product_id, qty, unit_cost) VALU
 INSERT INTO public.stock_counts (id, branch_id, staff_id, status, note, created_at) VALUES
 ('3c3304d2-3b6a-57db-ac48-88dd44e92da5', 'e9ca2485-0176-5779-a3fc-f67d255f00e1', '133e35f7-56d8-5ad2-8f9a-75651a642ff3', 'abierto', 'Conteo cíclico armazones', '2026-09-16T08:30:00');
 
-SET session_replication_role = DEFAULT;
+ALTER TABLE public.exams ENABLE TRIGGER USER;
+ALTER TABLE public.stock_movements ENABLE TRIGGER USER;
+ALTER TABLE public.payments ENABLE TRIGGER USER;
+ALTER TABLE public.sales ENABLE TRIGGER USER;
+ALTER TABLE public.customers ENABLE TRIGGER USER;
+ALTER TABLE public.quotes ENABLE TRIGGER USER;
+ALTER TABLE public.intercompany_docs ENABLE TRIGGER USER;
+ALTER TABLE public.cash_sessions ENABLE TRIGGER USER;
+ALTER TABLE public.lab_orders ENABLE TRIGGER USER;
 
 -- Recalcular agregados que normalmente mantienen los triggers
 INSERT INTO public.stock (product_id, branch_id, qty)
