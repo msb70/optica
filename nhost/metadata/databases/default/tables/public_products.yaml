@@ -1,0 +1,81 @@
+table:
+  name: products
+  schema: public
+array_relationships:
+- name: intercompany_items
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: intercompany_items
+        schema: public
+- name: quote_items
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: quote_items
+        schema: public
+- name: rmas
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: rmas
+        schema: public
+- name: sale_items
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: sale_items
+        schema: public
+- name: stock
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: stock
+        schema: public
+- name: stock_count_items
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: stock_count_items
+        schema: public
+- name: stock_movements
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: stock_movements
+        schema: public
+- name: transfer_items
+  using:
+    foreign_key_constraint_on:
+      column: product_id
+      table:
+        name: transfer_items
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

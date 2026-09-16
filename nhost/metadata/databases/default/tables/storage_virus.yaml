@@ -1,0 +1,15 @@
+table:
+  name: virus
+  schema: storage
+configuration:
+  custom_name: virus
+  custom_root_fields:
+    delete: deleteVirus
+    delete_by_pk: deleteViru
+    insert: insertVirus
+    insert_one: insertViru
+    select: virus
+    select_aggregate: virusAggregate
+    select_by_pk: viru
+    update: updateVirus
+    update_by_pk: updateViru

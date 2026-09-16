@@ -1,0 +1,28 @@
+table:
+  name: zoho_sync_queue
+  schema: public
+object_relationships:
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

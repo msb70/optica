@@ -1,0 +1,31 @@
+table:
+  name: cash_movements
+  schema: public
+object_relationships:
+- name: cash_session
+  using:
+    foreign_key_constraint_on: cash_session_id
+- name: staff
+  using:
+    foreign_key_constraint_on: staff_id
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

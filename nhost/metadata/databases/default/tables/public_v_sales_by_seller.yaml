@@ -1,0 +1,34 @@
+table:
+  name: v_sales_by_seller
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    manual_configuration:
+      remote_table:
+        name: branches
+        schema: public
+      column_mapping:
+        branch_id: id
+- name: company
+  using:
+    manual_configuration:
+      remote_table:
+        name: companies
+        schema: public
+      column_mapping:
+        company_id: id
+- name: seller
+  using:
+    manual_configuration:
+      remote_table:
+        name: staff
+        schema: public
+      column_mapping:
+        seller_id: id
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true

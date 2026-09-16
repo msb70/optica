@@ -1,0 +1,31 @@
+table:
+  name: intercompany_rules
+  schema: public
+object_relationships:
+- name: issuer_company
+  using:
+    foreign_key_constraint_on: issuer_company_id
+- name: receiver_company
+  using:
+    foreign_key_constraint_on: receiver_company_id
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

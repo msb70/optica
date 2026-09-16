@@ -1,0 +1,59 @@
+table:
+  name: cash_sessions
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: closer
+  using:
+    foreign_key_constraint_on: closed_by
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+- name: opener
+  using:
+    foreign_key_constraint_on: opened_by
+array_relationships:
+- name: cash_movements
+  using:
+    foreign_key_constraint_on:
+      column: cash_session_id
+      table:
+        name: cash_movements
+        schema: public
+- name: payments
+  using:
+    foreign_key_constraint_on:
+      column: cash_session_id
+      table:
+        name: payments
+        schema: public
+- name: sales
+  using:
+    foreign_key_constraint_on:
+      column: cash_session_id
+      table:
+        name: sales
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

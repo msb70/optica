@@ -1,0 +1,19 @@
+table:
+  name: files
+  schema: storage
+configuration:
+  custom_name: files
+  custom_root_fields:
+    delete: deleteFiles
+    delete_by_pk: deleteFile
+    insert: insertFiles
+    insert_one: insertFile
+    select: files
+    select_aggregate: filesAggregate
+    select_by_pk: file
+    update: updateFiles
+    update_by_pk: updateFile
+object_relationships:
+- name: bucket
+  using:
+    foreign_key_constraint_on: bucket_id

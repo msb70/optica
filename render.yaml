@@ -1,0 +1,17 @@
+# Blueprint de Render — https://render.com/docs/blueprint-spec
+# El servicio existente (optica-ocui) puede configurarse igual: Static Site, build `npm ci && npm run build`, publish `dist`.
+services:
+  - type: web
+    name: optica
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_NHOST_SUBDOMAIN
+        value: uisspsyswrtvnkgneuwl
+      - key: VITE_NHOST_REGION
+        value: eu-central-1

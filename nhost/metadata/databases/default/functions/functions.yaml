@@ -1,0 +1,35 @@
+- function:
+    name: create_sale
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: convert_quote
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: close_cash_session
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: transfer_send
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: transfer_receive
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user

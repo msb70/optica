@@ -1,0 +1,33 @@
+table:
+  name: audit_log
+  schema: public
+object_relationships:
+- name: company
+  using:
+    manual_configuration:
+      remote_table:
+        name: companies
+        schema: public
+      column_mapping:
+        company_id: id
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

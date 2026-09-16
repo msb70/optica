@@ -1,0 +1,31 @@
+table:
+  name: stock
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: product
+  using:
+    foreign_key_constraint_on: product_id
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

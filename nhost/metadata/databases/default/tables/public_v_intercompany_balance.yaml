@@ -1,0 +1,26 @@
+table:
+  name: v_intercompany_balance
+  schema: public
+object_relationships:
+- name: issuer_company
+  using:
+    manual_configuration:
+      remote_table:
+        name: companies
+        schema: public
+      column_mapping:
+        issuer_company_id: id
+- name: receiver_company
+  using:
+    manual_configuration:
+      remote_table:
+        name: companies
+        schema: public
+      column_mapping:
+        receiver_company_id: id
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true

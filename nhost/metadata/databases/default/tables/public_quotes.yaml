@@ -1,0 +1,55 @@
+table:
+  name: quotes
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+- name: customer
+  using:
+    foreign_key_constraint_on: customer_id
+- name: exam
+  using:
+    foreign_key_constraint_on: exam_id
+- name: seller
+  using:
+    foreign_key_constraint_on: seller_id
+array_relationships:
+- name: quote_items
+  using:
+    foreign_key_constraint_on:
+      column: quote_id
+      table:
+        name: quote_items
+        schema: public
+- name: sales
+  using:
+    foreign_key_constraint_on:
+      column: quote_id
+      table:
+        name: sales
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

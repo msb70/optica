@@ -1,0 +1,50 @@
+table:
+  name: users
+  schema: auth
+configuration:
+  custom_name: users
+  custom_root_fields:
+    delete: deleteUsers
+    delete_by_pk: deleteUser
+    insert: insertUsers
+    insert_one: insertUser
+    select: users
+    select_aggregate: usersAggregate
+    select_by_pk: user
+    update: updateUsers
+    update_by_pk: updateUser
+array_relationships:
+- name: refreshTokens
+  using:
+    foreign_key_constraint_on:
+      column: user_id
+      table:
+        name: refresh_tokens
+        schema: auth
+- name: roles
+  using:
+    foreign_key_constraint_on:
+      column: user_id
+      table:
+        name: user_roles
+        schema: auth
+- name: userProviders
+  using:
+    foreign_key_constraint_on:
+      column: user_id
+      table:
+        name: user_providers
+        schema: auth
+select_permissions:
+- role: user
+  permission:
+    columns:
+    - id
+    - display_name
+    - email
+    - avatar_url
+    - default_role
+    - created_at
+    filter:
+      id:
+        _eq: X-Hasura-User-Id

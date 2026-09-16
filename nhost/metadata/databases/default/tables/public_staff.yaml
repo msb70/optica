@@ -1,0 +1,137 @@
+table:
+  name: staff
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+array_relationships:
+- name: appointments
+  using:
+    foreign_key_constraint_on:
+      column: optometrist_id
+      table:
+        name: appointments
+        schema: public
+- name: cash_movements
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: cash_movements
+        schema: public
+- name: cash_sessions_closer
+  using:
+    foreign_key_constraint_on:
+      column: closed_by
+      table:
+        name: cash_sessions
+        schema: public
+- name: cash_sessions_opener
+  using:
+    foreign_key_constraint_on:
+      column: opened_by
+      table:
+        name: cash_sessions
+        schema: public
+- name: customer_notes
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: customer_notes
+        schema: public
+- name: exams
+  using:
+    foreign_key_constraint_on:
+      column: optometrist_id
+      table:
+        name: exams
+        schema: public
+- name: intercompany_docs
+  using:
+    foreign_key_constraint_on:
+      column: created_by
+      table:
+        name: intercompany_docs
+        schema: public
+- name: lab_order_events
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: lab_order_events
+        schema: public
+- name: quotes
+  using:
+    foreign_key_constraint_on:
+      column: seller_id
+      table:
+        name: quotes
+        schema: public
+- name: rma_events
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: rma_events
+        schema: public
+- name: sales_optometrist
+  using:
+    foreign_key_constraint_on:
+      column: optometrist_id
+      table:
+        name: sales
+        schema: public
+- name: sales_seller
+  using:
+    foreign_key_constraint_on:
+      column: seller_id
+      table:
+        name: sales
+        schema: public
+- name: stock_counts
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: stock_counts
+        schema: public
+- name: stock_movements
+  using:
+    foreign_key_constraint_on:
+      column: staff_id
+      table:
+        name: stock_movements
+        schema: public
+- name: transfers
+  using:
+    foreign_key_constraint_on:
+      column: requested_by
+      table:
+        name: transfers
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

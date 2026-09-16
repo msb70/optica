@@ -1,0 +1,127 @@
+table:
+  name: branches
+  schema: public
+object_relationships:
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+array_relationships:
+- name: appointments
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: appointments
+        schema: public
+- name: cash_sessions
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: cash_sessions
+        schema: public
+- name: customers
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: customers
+        schema: public
+- name: exams
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: exams
+        schema: public
+- name: lab_orders
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: lab_orders
+        schema: public
+- name: quotes
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: quotes
+        schema: public
+- name: rmas
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: rmas
+        schema: public
+- name: sales
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: sales
+        schema: public
+- name: staff
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: staff
+        schema: public
+- name: stock
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: stock
+        schema: public
+- name: stock_counts
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: stock_counts
+        schema: public
+- name: stock_movements
+  using:
+    foreign_key_constraint_on:
+      column: branch_id
+      table:
+        name: stock_movements
+        schema: public
+- name: transfers_from_branch
+  using:
+    foreign_key_constraint_on:
+      column: from_branch_id
+      table:
+        name: transfers
+        schema: public
+- name: transfers_to_branch
+  using:
+    foreign_key_constraint_on:
+      column: to_branch_id
+      table:
+        name: transfers
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

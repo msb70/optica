@@ -1,0 +1,42 @@
+table:
+  name: intercompany_docs
+  schema: public
+object_relationships:
+- name: creator
+  using:
+    foreign_key_constraint_on: created_by
+- name: issuer_company
+  using:
+    foreign_key_constraint_on: issuer_company_id
+- name: receiver_company
+  using:
+    foreign_key_constraint_on: receiver_company_id
+array_relationships:
+- name: intercompany_items
+  using:
+    foreign_key_constraint_on:
+      column: doc_id
+      table:
+        name: intercompany_items
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

@@ -1,0 +1,62 @@
+table:
+  name: exams
+  schema: public
+object_relationships:
+- name: appointment
+  using:
+    foreign_key_constraint_on: appointment_id
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+- name: customer
+  using:
+    foreign_key_constraint_on: customer_id
+- name: optometrist
+  using:
+    foreign_key_constraint_on: optometrist_id
+array_relationships:
+- name: lab_orders
+  using:
+    foreign_key_constraint_on:
+      column: exam_id
+      table:
+        name: lab_orders
+        schema: public
+- name: quotes
+  using:
+    foreign_key_constraint_on:
+      column: exam_id
+      table:
+        name: quotes
+        schema: public
+- name: sales
+  using:
+    foreign_key_constraint_on:
+      column: exam_id
+      table:
+        name: sales
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

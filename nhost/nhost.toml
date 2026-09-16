@@ -1,0 +1,74 @@
+[global]
+
+[hasura]
+version = 'v2.48.10-ce'
+adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
+webhookSecret = '{{ secrets.NHOST_WEBHOOK_SECRET }}'
+
+[[hasura.jwtSecrets]]
+type = 'RS256'
+key = '{{ secrets.NHOST_JWT_PUBLIC_KEY }}'
+signingKey = '{{ secrets.NHOST_JWT_PRIVATE_KEY }}'
+kid = '{{ secrets.NHOST_JWT_KID }}'
+
+[hasura.settings]
+corsDomain = ['*']
+devMode = false
+enableAllowList = false
+enableConsole = true
+enableRemoteSchemaPermissions = false
+enabledAPIs = ['metadata', 'graphql', 'pgdump', 'config']
+inferFunctionPermissions = true
+
+[hasura.logs]
+level = 'warn'
+
+[hasura.events]
+httpPoolSize = 100
+
+
+[auth]
+
+[auth.redirections]
+clientUrl = 'https://optica-ocui.onrender.com'
+allowedUrls = ['https://optica-ocui.onrender.com', 'http://localhost:5173', 'http://localhost:4173']
+
+[auth.signUp]
+enabled = true
+disableNewUsers = false
+
+[auth.user]
+[auth.user.roles]
+default = 'user'
+allowed = ['user', 'me']
+
+[auth.user.locale]
+default = 'es'
+allowed = ['es', 'en']
+
+[auth.session]
+[auth.session.accessToken]
+expiresIn = 900
+
+[auth.session.refreshToken]
+expiresIn = 2592000
+
+[auth.method]
+[auth.method.anonymous]
+enabled = false
+
+[auth.method.emailPassword]
+hibpEnabled = false
+emailVerificationRequired = false
+passwordMinLength = 8
+
+[postgres]
+
+[postgres.resources.storage]
+capacity = 1
+
+[storage]
+
+[observability]
+[observability.grafana]
+adminPassword = '{{ secrets.GRAFANA_ADMIN_PASSWORD }}'

@@ -1,0 +1,88 @@
+table:
+  name: customers
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    foreign_key_constraint_on: branch_id
+- name: company
+  using:
+    foreign_key_constraint_on: company_id
+array_relationships:
+- name: appointments
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: appointments
+        schema: public
+- name: customer_notes
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: customer_notes
+        schema: public
+- name: exams
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: exams
+        schema: public
+- name: lab_orders
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: lab_orders
+        schema: public
+- name: quotes
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: quotes
+        schema: public
+- name: rmas
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: rmas
+        schema: public
+- name: sales
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: sales
+        schema: public
+- name: vouchers
+  using:
+    foreign_key_constraint_on:
+      column: customer_id
+      table:
+        name: vouchers
+        schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    allow_aggregations: true
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}
