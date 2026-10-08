@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './lib/auth'
 import { AppProvider, useApp } from './lib/app'
 import Layout from './components/Layout'
@@ -31,7 +31,23 @@ function Gate() {
 }
 
 function Shell() {
-  const { loading, company } = useApp()
+  const { loading, company, companies, organizationError, retryOrganization } = useApp()
+  const { signOut } = useAuth()
+  const queryClient = useQueryClient()
+  if (organizationError || (!loading && !companies.length)) return (
+    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <section className="card max-w-lg p-6" role="alert">
+        <h1 className="text-xl font-bold text-slate-900">{organizationError ? 'No se pudo cargar la organización' : 'No hay compañías disponibles'}</h1>
+        <p className="mt-3 text-sm text-slate-600">{organizationError
+          ? 'No pudimos acceder a los datos. Reintenta la conexión o vuelve a iniciar sesión. Si el problema continúa, contacta con el administrador.'
+          : 'Tu cuenta no tiene compañías disponibles. Contacta con el administrador para revisar la configuración y el acceso.'}</p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button className="btn-primary" onClick={retryOrganization}>Reintentar</button>
+          <button className="btn-secondary" onClick={async () => { await signOut(); queryClient.clear() }}>Volver a iniciar sesión</button>
+        </div>
+      </section>
+    </main>
+  )
   if (loading || !company) return <Loading label="Cargando organización…" />
   return (
     <Routes>

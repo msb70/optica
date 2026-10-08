@@ -55,7 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null
       } catch (e) { return errMsg(e) }
     },
-    signOut: async () => { if (!isDevMode) await nhost.auth.signOut({ refreshToken: nhost.getUserSession()?.refreshToken ?? '' }) },
+    signOut: async () => {
+      if (isDevMode) return
+      try {
+        await nhost.auth.signOut({ refreshToken: nhost.getUserSession()?.refreshToken ?? '' })
+      } catch {
+        // Permite salir de una sesión caducada incluso si Auth no responde.
+      } finally {
+        nhost.clearSession()
+      }
+    },
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -16,6 +16,8 @@ interface AppCtx {
   cashSession: CashSession | null
   refreshCash: () => void
   loading: boolean
+  organizationError: Error | null
+  retryOrganization: () => void
   currency: (n: number | string | null | undefined) => string
 }
 
@@ -68,6 +70,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cashSession: cash.data?.cash_sessions?.[0] ?? null,
     refreshCash: () => { void cash.refetch() },
     loading: org.isLoading,
+    organizationError: org.error,
+    retryOrganization: () => { void org.refetch() },
     currency: (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: company?.currency || 'USD', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 2 }).format(Number(n ?? 0)),
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
