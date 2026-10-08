@@ -28,6 +28,7 @@ httpPoolSize = 100
 
 
 [auth]
+version = '0.52.0'
 
 [auth.redirections]
 clientUrl = 'https://optica-ocui.onrender.com'
