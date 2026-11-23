@@ -100,7 +100,7 @@ export default function Reportes() {
 
       {tab === 'operacion' && <div className="grid lg:grid-cols-3 gap-4">
         <Card title="Tiempo de entrega promedio (días)" subtitle="Desde venta hasta entrega de lentes"><Bars data={v.byBranch.map((b) => ({ name: b.name, dias: Number((((b.delivery as number[]).reduce((a, x) => a + x, 0) / ((b.delivery as number[]).length || 1))).toFixed(1)) }))} x="name" series={[{ key: 'dias', label: 'Días', color: '#f59e0b' }]} money={false} height={220} /></Card>
-        <Card title="Devoluciones y reclamos" subtitle={`${d?.rmas.length} RMA en el periodo · ${money(d?.rmas.reduce((a, r) => a + Number(r.refund_amount ?? 0), 0))} reembolsado`}><Donut data={v.rmaByType} money={false} /></Card>
+        <Card title="Devoluciones y reclamos" subtitle={`${d?.rmas.length} RMA en el periodo · ${money(d?.rmas.filter((r) => r.type === 'devolucion').reduce((a, r) => a + Number(r.refund_amount ?? 0), 0))} reembolsado`}><Donut data={v.rmaByType} money={false} /></Card>
         <Card title="Descuentos otorgados" subtitle="Total mensual"><AreaTrend data={v.byMonth} x="month" y="discounts" color="#ef4444" height={220} /></Card>
       </div>}
 

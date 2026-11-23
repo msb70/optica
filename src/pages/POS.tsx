@@ -19,6 +19,7 @@ const NEW_CUSTOMER = `mutation NewCustomer($o: customers_insert_input!) { insert
 
 type PosProduct = Product & { stock: { qty: number }[] }
 type Line = { product: PosProduct; qty: number; discount_pct: number }
+const CARD_BRANDS = ['Visa', 'Mastercard', 'Diners Club', 'American Express']
 type Pay = { method: string; amount: number; reference?: string; voucher_id?: string }
 const METHOD_ICON: Record<string, React.ReactNode> = { efectivo: <Banknote size={15} />, tarjeta: <CreditCard size={15} />, transferencia: <ArrowLeftRight size={15} />, yappy: <Smartphone size={15} />, vale: <Ticket size={15} />, saldo_cliente: <Wallet size={15} /> }
 
@@ -233,6 +234,7 @@ function PayForm({ total, pays, setPays, pending, customer, companyId, currency 
   const [method, setMethod] = useState('tarjeta')
   const [amount, setAmount] = useState<number>(total)
   const [ref, setRef] = useState('')
+  const [brand, setBrand] = useState('')
   const [voucherCode, setVoucherCode] = useState('')
   const [voucher, setVoucher] = useState<{ id: string; balance: number; code: string } | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -249,22 +251,24 @@ function PayForm({ total, pays, setPays, pending, customer, companyId, currency 
     setErr(null)
     if (amount <= 0) return
     if (method === 'vale') { if (!voucher) { setErr('Valida el vale primero'); return } if (amount > Number(voucher.balance)) { setErr('Supera el saldo del vale'); return } }
+    if (method === 'tarjeta' && !brand) { setErr('Selecciona la tarjeta: Visa, Mastercard, Diners Club o American Express'); return }
     if (method === 'saldo_cliente' && amount > Number(customer?.balance ?? 0)) { setErr('El cliente no tiene ese saldo a favor'); return }
-    setPays([...pays, { method, amount: Math.round(amount * 100) / 100, reference: ref || undefined, voucher_id: voucher?.id }])
-    setRef(''); setVoucher(null); setVoucherCode('')
+    setPays([...pays, { method, amount: Math.round(amount * 100) / 100, reference: method === 'tarjeta' ? brand : (ref || undefined), voucher_id: method === 'vale' ? voucher?.id : undefined }])
+    setRef(''); setBrand(''); setVoucher(null); setVoucherCode('')
   }
   const change = pays.filter((p) => p.method === 'efectivo').reduce((a, p) => a + p.amount, 0) - Math.max(0, total - pays.filter((p) => p.method !== 'efectivo').reduce((a, p) => a + p.amount, 0))
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-2">
-        {Object.keys(METHODS).filter((m) => m !== 'credito').map((m) => <button key={m} onClick={() => { setMethod(m); setAmount(Math.max(0, pending)) }} className={clsx('rounded-xl border p-2.5 text-xs font-semibold flex flex-col items-center gap-1 transition', method === m ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{METHOD_ICON[m]}{METHODS[m]}</button>)}
+        {Object.keys(METHODS).filter((m) => m !== 'credito').map((m) => <button key={m} onClick={() => { setMethod(m); setBrand(''); setRef(''); setAmount(Math.max(0, pending)) }} className={clsx('rounded-xl border p-2.5 text-xs font-semibold flex flex-col items-center gap-1 transition', method === m ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{METHOD_ICON[m]}{METHODS[m]}</button>)}
       </div>
+      {method === 'tarjeta' && <div><div className="label">Tarjeta</div><div className="grid grid-cols-4 gap-2">{CARD_BRANDS.map((b) => <button key={b} type="button" onClick={() => setBrand(b)} className={clsx('rounded-xl border px-2 py-2 text-xs font-semibold transition', brand === b ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{b}</button>)}</div></div>}
       {method === 'vale' && <div className="flex gap-2"><input className="input" placeholder="Código del vale (VALE-2026-0001)" value={voucherCode} onChange={(e) => setVoucherCode(e.target.value)} /><button className="btn-secondary shrink-0" onClick={lookupVoucher}>Validar</button></div>}
       {voucher && <div className="text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">Vale {voucher.code} · saldo {currency(Number(voucher.balance))}</div>}
       {method === 'saldo_cliente' && <div className="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2">Saldo a favor del cliente: <b>{currency(Math.max(0, Number(customer?.balance ?? 0)))}</b></div>}
-      <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+      <div className={clsx('grid gap-2 items-end', ['transferencia', 'yappy'].includes(method) ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]')}>
         <Field label="Importe"><input type="number" step="0.01" className="input h-11 text-lg font-bold" value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></Field>
-        <Field label="Referencia"><input className="input h-11" placeholder="Voucher / nº op." value={ref} onChange={(e) => setRef(e.target.value)} /></Field>
+        {['transferencia', 'yappy'].includes(method) && <Field label="Nº de operación"><input className="input h-11" placeholder="Nº de operación" value={ref} onChange={(e) => setRef(e.target.value)} /></Field>}
         <button className="btn-dark h-11" onClick={addPay}><Plus size={15} />Añadir</button>
       </div>
       <div className="flex flex-wrap gap-1.5">{[0.25, 0.5, 1].map((f) => <button key={f} className="btn-secondary h-7 text-xs" onClick={() => setAmount(Math.round(Math.max(0, pending) * f * 100) / 100)}>{f === 1 ? 'Todo' : `${f * 100}%`}</button>)}</div>

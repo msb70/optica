@@ -14,6 +14,8 @@ const Q = `query Rmas($branch: uuid!, $open: Boolean!) { rmas(where:{branch_id:{
 const SALES_Q = `query RmaSales($q: String!, $branch: uuid!) { sales(where:{branch_id:{_eq:$branch}, _or:[{number:{_ilike:$q}},{customer:{last_name:{_ilike:$q}}},{customer:{first_name:{_ilike:$q}}}]}, order_by:{sale_date:desc}, limit:8) { id number total sale_date customer_id customer { first_name last_name } sale_items { product_id description } } }`
 const INSERT = `mutation NewRma($o: rmas_insert_input!) { insert_rmas_one(object:$o) { id number } }`
 const ADV = `mutation AdvRma($id: uuid!, $set: rmas_set_input!, $ev: rma_events_insert_input!) { update_rmas_by_pk(pk_columns:{id:$id}, _set:$set) { id } insert_rma_events_one(object:$ev) { id } }`
+const RMA_METHODS: [string, string][] = [['efectivo', 'Efectivo'], ['tarjeta', 'Tarjeta'], ['vale', 'Vale'], ['saldo_cliente', 'Saldo al cliente']]
+const methodLabel = (m?: string | null) => RMA_METHODS.find(([v]) => v === m)?.[1] ?? m ?? ''
 const FLOW = ['abierto', 'en_revision', 'aprobado', 'en_reparacion', 'resuelto', 'cerrado']
 
 export default function RMA() {
@@ -28,7 +30,7 @@ export default function RMA() {
 
   const advance = async (r: Rma, to: string) => {
     const set: Record<string, unknown> = { status: to }
-    if (['resuelto', 'cerrado', 'rechazado'].includes(to)) { set.resolved_at = new Date().toISOString(); set.resolution = res.resolution || null; set.refund_amount = r.type === 'devolucion' ? res.refund_amount : 0; set.refund_method = res.refund_method }
+    if (['resuelto', 'cerrado', 'rechazado'].includes(to)) { set.resolved_at = new Date().toISOString(); set.resolution = res.resolution || null; const paid = r.type === 'devolucion' || r.type === 'reparacion'; set.refund_amount = paid ? res.refund_amount : 0; set.refund_method = paid && res.refund_amount > 0 ? res.refund_method : null }
     await gql(ADV, { id: r.id, set, ev: { rma_id: r.id, status: to, staff_id: me?.id ?? null, note: res.resolution || `Estado → ${STATUS_LABEL[to]}` } })
     setSel(null); setToast(`${r.number} → ${STATUS_LABEL[to]}`); void q.refetch()
   }
@@ -39,7 +41,7 @@ export default function RMA() {
       <Card padded={false}>
         {q.isLoading ? <Loading /> : list.length === 0 ? <Empty title="Sin reclamos en esta vista" /> : (
           <div className="overflow-x-auto"><table className="table">
-            <thead><tr><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Producto</th><th>Motivo</th><th>Venta</th><th>Estado</th><th className="text-right">Reembolso</th></tr></thead>
+            <thead><tr><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th>Producto</th><th>Motivo</th><th>Venta</th><th>Estado</th><th className="text-right">Importe</th></tr></thead>
             <tbody>{list.map((r) => <tr key={r.id} className="cursor-pointer" onClick={() => { setSel(r); setRes({ resolution: r.resolution ?? '', refund_amount: Number(r.refund_amount), refund_method: r.refund_method ?? 'efectivo', next: '' }) }}>
               <td className="font-mono text-xs">{r.number}</td><td className="text-xs text-slate-500">{fdate(r.created_at)}</td>
               <td><span className="flex items-center gap-2"><Avatar name={fullName(r.customer)} className="h-7 w-7 text-[10px]" /><span className="font-medium">{fullName(r.customer)}</span></span></td>
@@ -64,8 +66,8 @@ export default function RMA() {
           </div>
           {!['resuelto', 'cerrado', 'rechazado'].includes(sel.status) ? <div className="grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-3">
             <Field label="Resolución" className="col-span-2"><input className="input" placeholder="Ej. reemplazo sin costo, reparación de bisagra…" value={res.resolution} onChange={(e) => setRes({ ...res, resolution: e.target.value })} /></Field>
-            {sel.type === 'devolucion' && <><Field label="Importe a reembolsar"><input type="number" className="input" value={res.refund_amount} onChange={(e) => setRes({ ...res, refund_amount: Number(e.target.value) })} /></Field><Field label="Método"><select className="input" value={res.refund_method} onChange={(e) => setRes({ ...res, refund_method: e.target.value })}>{['efectivo', 'tarjeta', 'vale', 'saldo_cliente'].map((m) => <option key={m}>{m}</option>)}</select></Field></>}
-          </div> : <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-800"><b>Resolución:</b> {sel.resolution ?? '—'} {Number(sel.refund_amount) > 0 && <>· reembolso {money(sel.refund_amount)} ({sel.refund_method})</>}<div className="text-xs mt-1">{fdate(sel.resolved_at)}</div></div>}
+            {(sel.type === 'devolucion' || sel.type === 'reparacion') && <><Field label={sel.type === 'devolucion' ? 'Importe a reembolsar' : 'Importe de la reparación'}><input type="number" className="input" value={res.refund_amount} onChange={(e) => setRes({ ...res, refund_amount: Number(e.target.value) })} /></Field><Field label={sel.type === 'devolucion' ? 'Método de reembolso' : 'Método de pago'}><select className="input" value={res.refund_method} onChange={(e) => setRes({ ...res, refund_method: e.target.value })}>{RMA_METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field></>}
+          </div> : <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-800"><b>Resolución:</b> {sel.resolution ?? '—'} {Number(sel.refund_amount) > 0 && <>· {sel.type === 'reparacion' ? 'cobrado' : 'reembolso'} {money(sel.refund_amount)} ({methodLabel(sel.refund_method)})</>}<div className="text-xs mt-1">{fdate(sel.resolved_at)}</div></div>}
           <div><div className="label">Trazabilidad</div><ol className="space-y-1.5">{sel.rma_events?.map((e) => <li key={e.id} className="flex items-center gap-2 text-xs"><StatusBadge status={e.status} /><span className="text-slate-600">{e.note}</span><span className="ml-auto text-slate-400">{fdate(e.created_at, 'dd MMM HH:mm')}</span></li>)}</ol></div>
         </div>}
       </Modal>
