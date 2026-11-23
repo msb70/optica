@@ -48,6 +48,12 @@ body { @apply bg-slate-50 text-slate-800 antialiased font-sans; font-feature-set
   body { background: white; }
   html, body, #root, .h-full { height: auto !important; overflow: visible !important; }
   main { overflow: visible !important; padding: 0 !important; }
-  .break-inside-avoid, .card { break-inside: avoid; }
-  @page { size: A4 landscape; margin: 12mm; }
+  @page { size: A4 landscape; margin: 8mm; }
+  .print-root { zoom: var(--pz, 1); }
+  .print-root .fade-up { animation: none !important; }
 }
+
+/* composición del PDF de reportes: cada sección en una columna, tarjetas a ancho completo */
+.print-sections > div { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.print-sections > div > * { grid-column: span 1 / span 1 !important; }
+.print-sections > div > .lg\:col-span-2, .print-sections > div > .lg\:col-span-3 { grid-column: span 2 / span 2 !important; }

@@ -106,7 +106,18 @@ export default function Reportes() {
     return { byMonth, byBranch, branchMonthly, sellers, sources, cats, brands, topProducts, optos, funnelByBranch, rmaByType, rmasF, groupMonthly, groupCodes, totals, netTotal, branchNames: brs.map((b) => b.name) }
   }, [d, f, months, itemFilter, companyBranches.length, staff.length])
   const filterSummary = (Object.keys(f) as (keyof Filters)[]).filter((k) => f[k].length).map((k) => { const names: Record<keyof Filters, string> = { branches: 'Sucursal', sellers: 'Vendedor', optos: 'Optometrista', products: 'Producto', categories: 'Categoría', brands: 'Marca', sources: 'Origen' }; return `${names[k]}: ${f[k].map((x) => opts[k].find((o) => o.value === x)?.label ?? x).join(', ')}` })
-  const exportPdf = () => { setPrinting(true); setTimeout(() => { const prev = document.title; document.title = `${new Date().toISOString().slice(0, 10)}_Reporte_${company?.code}_${months}m`; window.print(); document.title = prev; setPrinting(false) }, 600) }
+  const rootRef = useRef<HTMLDivElement>(null)
+  // A4 horizontal con márgenes de 8 mm → 281 × 194 mm ≈ 1062 × 733 px a 96 dpi
+  const PRINT_W = 2600
+  const exportPdf = () => {
+    setPrinting(true)
+    setTimeout(() => {
+      const el = rootRef.current
+      if (el) { const h = el.scrollHeight; const z = Math.min(1062 / PRINT_W, 733 / h) * 0.94; el.style.setProperty('--pz', String(z)) }
+      const prev = document.title; document.title = `${new Date().toISOString().slice(0, 10)}_Reporte_${company?.code}_${months}m`
+      window.print(); document.title = prev; setPrinting(false)
+    }, 900)
+  }
 
   const exportCsv = () => {
     if (!v) return
@@ -118,7 +129,7 @@ export default function Reportes() {
   const colors = ['#1b5cf5', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444']
 
   return (
-    <div className="space-y-4">
+    <div ref={rootRef} className={printing ? 'print-root space-y-3' : 'space-y-4'} style={printing ? { width: PRINT_W } : undefined}>
       <PageHeader title="Reportes y KPIs" subtitle={`${company?.legal_name} · ${months === 1 ? '1 mes' : `${months} meses`}${activeCount ? ` · ${activeCount} filtro(s) activo(s)` : ''}`} actions={<div className="flex items-center gap-2 no-print"><Tabs value={months} onChange={setMonths} items={[{ value: 1, label: '1 mes' }, { value: 3, label: '3 meses' }, { value: 6, label: '6 meses' }, { value: 12, label: '12 meses' }]} /><button className="btn-secondary" onClick={exportCsv}><Download size={15} />CSV</button><button className="btn-primary" onClick={exportPdf}><FileDown size={15} />PDF</button></div>} />
       <Card className="p-3 no-print relative z-20 !overflow-visible"><div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-500"><Filter size={13} />Filtros {activeCount > 0 && <button className="btn-ghost h-6 text-xs ml-auto" onClick={() => setF(EMPTY)}><X size={12} />Quitar filtros ({activeCount})</button>}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
@@ -136,6 +147,7 @@ export default function Reportes() {
       </div>
       <div className="no-print"><Tabs value={tab} onChange={setTab} items={[{ value: 'ventas', label: 'Ventas por sucursal' }, { value: 'vendedores', label: 'Vendedores y optometristas' }, { value: 'productos', label: 'Mix de productos' }, { value: 'origen', label: 'Origen y embudo' }, { value: 'operacion', label: 'Operación (entrega, RMA, descuentos)' }, { value: 'grupo', label: 'Grupo (3 compañías)' }]} /></div>
 
+      <div className={printing ? 'grid grid-cols-3 gap-3 items-start print-sections' : 'contents'}>
       {(printing || tab === 'ventas') && <div className="break-inside-avoid grid lg:grid-cols-3 gap-4">
         <Card title="Ventas mensuales por sucursal" className="lg:col-span-2"><Bars data={v.branchMonthly} x="month" series={v.branchNames.map((b, i) => ({ key: b, label: b, color: colors[i % colors.length] }))} stacked height={280} /></Card>
         <Card title="Cumplimiento de meta" subtitle="Acumulado del periodo vs. meta mensual × meses"><ul className="space-y-3">{v.byBranch.map((b) => <li key={b.name as string}><div className="flex justify-between text-sm mb-1"><b>{b.name as string}</b><span className="text-slate-500">{money(b.revenue as number)} · {pct((b.revenue as number) / ((b.goal as number) || 1), 0)}</span></div><Progress value={(b.revenue as number) / ((b.goal as number) || 1)} tone={(b.revenue as number) / ((b.goal as number) || 1) >= 0.9 ? 'green' : 'brand'} /><div className="text-[11px] text-slate-400 mt-0.5">{num(b.tickets as number)} tickets · margen {pct(b.margin / (b.net || 1), 0)}</div></li>)}</ul></Card>
@@ -170,6 +182,7 @@ export default function Reportes() {
       {(printing || tab === 'grupo') && <div className="break-inside-avoid grid lg:grid-cols-3 gap-4">
         <Card title="Ventas por compañía del grupo" subtitle="Consolidado Optilux S.A. · Optilux Chorrera S.A. · Optilux David (reportes fiscales separados por razón social)" className="lg:col-span-3"><Bars data={v.groupMonthly} x="month" series={v.groupCodes.map((c, i) => ({ key: c, label: c, color: colors[i] }))} height={280} /></Card>
       </div>}
+      </div>
     </div>
   )
 }
