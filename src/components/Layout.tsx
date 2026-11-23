@@ -69,7 +69,7 @@ export default function Layout() {
 
   return (
     <div className="flex h-full">
-      <div className="hidden lg:block shrink-0">{Sidebar}</div>
+      <div className="hidden lg:block shrink-0 no-print">{Sidebar}</div>
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-ink-900/60" onClick={() => setOpen(false)} />
