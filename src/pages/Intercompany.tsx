@@ -19,11 +19,17 @@ const SET = `mutation SetIC($id: uuid!, $set: intercompany_docs_set_input!) { up
 const INSERT = `mutation NewIC($o: intercompany_docs_insert_input!) { insert_intercompany_docs_one(object:$o) { id number } }`
 const RULE = `mutation Rule($o: intercompany_rules_insert_input!) { insert_intercompany_rules_one(object:$o, on_conflict:{constraint: intercompany_rules_issuer_company_id_receiver_company_id_key, update_columns:[markup_pct, auto_on_transfer, auto_on_lab_order, payment_terms_days, active]}) { id } }`
 
+const PRODUCTS_Q = `query ICProducts($branch: uuid!) { products(where:{active:{_eq:true}, track_stock:{_eq:true}}, order_by:{name:asc}) { id sku name cost stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
+const NEW_TRANSFER = `mutation NewTransfer($o: transfers_insert_input!) { insert_transfers_one(object:$o) { id number } }`
+const SEND = `mutation Send($id: uuid!, $staff: uuid) { transfer_send(args:{p_transfer_id:$id, p_staff_id:$staff}) { id status intercompany intercompany_doc_id } }`
+const DOC_NUM = `query DocNum($id: uuid!) { intercompany_docs_by_pk(id:$id) { number total } }`
+type ICProduct = { id: string; sku: string; name: string; cost: number; stock: { qty: number }[] }
+
 type Doc = IntercompanyDoc & { creator?: { name: string } }
 type Rule = { id: string; issuer_company_id: string; receiver_company_id: string; markup_pct: number; auto_on_transfer: boolean; auto_on_lab_order: boolean; payment_terms_days: number; active: boolean; issuer_company: { code: string }; receiver_company: { code: string } }
 
 export default function Intercompany() {
-  const { company, companies, me } = useApp()
+  const { company, companies, branches, branch, me } = useApp()
   const [tab, setTab] = useState<'docs' | 'cobrar' | 'pagar' | 'reglas' | 'auditoria'>('docs')
   const [sel, setSel] = useState<Doc | null>(null)
   const [nuevo, setNuevo] = useState(false)
@@ -86,7 +92,7 @@ export default function Intercompany() {
           <div className="text-[11px] text-slate-400 flex items-center gap-1"><FileText size={11} />Sincronización Zoho: <StatusBadge status={sel.zoho_sync_status} /> · Invoice en Books de la emisora y Bill en Books de la receptora (org_id independientes).</div>
         </div>}
       </Modal>
-      {nuevo && <NuevoDoc onClose={() => setNuevo(false)} onCreated={(n) => { setNuevo(false); setToast(`Documento ${n} emitido`); void q.refetch() }} companies={companies} issuerId={company!.id} prefix={company!.invoice_prefix} taxRate={Number(company!.tax_rate)} staffId={me?.id ?? null} />}
+      {nuevo && <NuevoDoc onClose={() => setNuevo(false)} onCreated={(n) => { setNuevo(false); setToast(n.includes("traspaso") ? `Documento ${n}` : `Documento ${n} emitido`); void q.refetch() }} companies={companies} issuerId={company!.id} prefix={company!.invoice_prefix} taxRate={Number(company!.tax_rate)} staffId={me?.id ?? null} branches={branches} currentBranchId={branch?.id ?? null} rules={q.data?.rules ?? []} />}
       <Toast msg={toast} onClose={() => setToast(null)} />
     </div>
   )
@@ -117,9 +123,36 @@ function Reglas({ rules, companies, onSaved }: { rules: Rule[]; companies: { id:
   )
 }
 
-function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, staffId }: { onClose: () => void; onCreated: (n: string) => void; companies: { id: string; code: string; legal_name: string }[]; issuerId: string; prefix: string; taxRate: number; staffId: string | null }) {
+function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, staffId, branches, currentBranchId, rules }: { onClose: () => void; onCreated: (n: string) => void; companies: { id: string; code: string; legal_name: string }[]; issuerId: string; prefix: string; taxRate: number; staffId: string | null; branches: { id: string; name: string; company_id: string }[]; currentBranchId: string | null; rules: Rule[] }) {
   const [f, setF] = useState({ receiver_company_id: companies.find((c) => c.id !== issuerId)?.id ?? '', concept: '', origin_type: 'servicio', due: 30 })
   const [items, setItems] = useState([{ description: '', qty: 1, unit_price: 0 }])
+  const isTr = f.origin_type === 'traspaso'
+  const fromOpts = branches.filter((b) => b.company_id === issuerId), toOpts = branches.filter((b) => b.company_id === f.receiver_company_id)
+  const [fromB, setFromB] = useState(fromOpts.find((b) => b.id === currentBranchId)?.id ?? fromOpts[0]?.id ?? '')
+  const [toB, setToB] = useState('')
+  const toBranch = toOpts.find((b) => b.id === toB) ? toB : (toOpts[0]?.id ?? '')
+  const [tItems, setTItems] = useState<{ product_id: string; qty: number }[]>([])
+  const [pq, setPq] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const prodQ = useQuery({ queryKey: ['ic-products', fromB], queryFn: () => gql<{ products: ICProduct[] }>(PRODUCTS_Q, { branch: fromB }), enabled: isTr && !!fromB })
+  const prods = prodQ.data?.products ?? []
+  const avail = (p?: ICProduct) => Number(p?.stock[0]?.qty ?? 0)
+  const rule = rules.find((r) => r.issuer_company_id === issuerId && r.receiver_company_id === f.receiver_company_id && r.active && r.auto_on_transfer)
+  const markup = Number(rule?.markup_pct ?? 0)
+  const found = pq ? prods.filter((p) => (p.name.toLowerCase().includes(pq.toLowerCase()) || p.sku.toLowerCase().includes(pq.toLowerCase())) && avail(p) > 0).slice(0, 8) : []
+  const trSubtotal = tItems.reduce((a, i) => { const p = prods.find((x) => x.id === i.product_id); return a + Math.round(Number(p?.cost ?? 0) * (1 + markup / 100) * 100) / 100 * i.qty }, 0)
+  const trTax = Math.round(trSubtotal * taxRate) / 100
+  const saveTransfer = async () => {
+    setErr(null); setBusy(true)
+    try {
+      const t = await gql<{ insert_transfers_one: { id: string; number: string } }>(NEW_TRANSFER, { o: { number: `TR-${String(Date.now()).slice(-6)}`, from_branch_id: fromB, to_branch_id: toBranch, status: 'borrador', requested_by: staffId, note: f.concept || 'Traspaso intercompany', transfer_items: { data: tItems.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_cost: prods.find((p) => p.id === i.product_id)?.cost ?? 0 })) } } })
+      const sent = await gql<{ transfer_send: { intercompany_doc_id: string | null }[] }>(SEND, { id: t.insert_transfers_one.id, staff: staffId })
+      const docId = sent.transfer_send[0]?.intercompany_doc_id
+      const d = docId ? await gql<{ intercompany_docs_by_pk: { number: string } }>(DOC_NUM, { id: docId }) : null
+      onCreated(`${d?.intercompany_docs_by_pk.number ?? ''} · traspaso ${t.insert_transfers_one.number} enviado (stock descontado en origen; la sucursal destino lo recibe en Stock → Traspasos)`)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'No se pudo emitir el traspaso') } finally { setBusy(false) }
+  }
   const subtotal = items.reduce((a, i) => a + i.qty * i.unit_price, 0), tax = Math.round(subtotal * taxRate) / 100
   const save = async () => {
     const due = new Date(); due.setDate(due.getDate() + f.due)
@@ -127,7 +160,7 @@ function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, st
     onCreated(r.insert_intercompany_docs_one.number)
   }
   return (
-    <Modal open onClose={onClose} title="Documento intercompany manual" size="md" footer={<><button className="btn-secondary" onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={!f.concept || !subtotal} onClick={save}>Emitir · {money(subtotal + tax)}</button></>}>
+    <Modal open onClose={onClose} title="Documento intercompany manual" size="md" footer={<><button className="btn-secondary" onClick={onClose}>Cancelar</button>{isTr ? <button className="btn-primary" disabled={busy || !tItems.length || !fromB || !toBranch || !rule} onClick={saveTransfer}>Enviar traspaso · {money(trSubtotal + trTax)}</button> : <button className="btn-primary" disabled={!f.concept || !subtotal} onClick={save}>Emitir · {money(subtotal + tax)}</button>}</>}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Emisora"><input className="input" disabled value={companies.find((c) => c.id === issuerId)?.legal_name} /></Field>
@@ -136,8 +169,26 @@ function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, st
           <Field label="Tipo"><select className="input" value={f.origin_type} onChange={(e) => setF({ ...f, origin_type: e.target.value })}>{['servicio', 'traspaso', 'orden_lab', 'manual'].map((t) => <option key={t} value={t}>{STATUS_LABEL[t]}</option>)}</select></Field>
           <Field label="Vencimiento (días)"><input type="number" className="input" value={f.due} onChange={(e) => setF({ ...f, due: Number(e.target.value) })} /></Field>
         </div>
+        {isTr ? <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Sucursal origen (emisora)"><select className="input" value={fromB} onChange={(e) => { setFromB(e.target.value); setTItems([]) }}>{fromOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
+            <Field label="Sucursal destino (receptora)"><select className="input" value={toBranch} onChange={(e) => setToB(e.target.value)}>{toOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>
+          </div>
+          {!rule ? <div className="rounded-xl bg-amber-50 border border-amber-100 text-amber-800 text-xs px-3 py-2">No hay una regla activa con «Auto traspaso» entre estas compañías. Créala en la pestaña <b>Reglas</b> para poder facturar el traspaso.</div>
+            : <div className="rounded-xl bg-violet-50 border border-violet-100 text-violet-800 text-xs px-3 py-2">Se valora a costo + {markup}% de margen. Al enviar se descuenta el stock en origen y se emite el documento intercompany; el destino suma el stock al recibirlo.</div>}
+          <div className="relative"><span className="label">Añadir artículo</span><input className="input h-10" placeholder="Buscar por SKU o nombre…" value={pq} onChange={(e) => setPq(e.target.value)} />
+            {found.length > 0 && <div className="absolute z-20 mt-1 w-full card p-1">{found.map((p) => <button key={p.id} type="button" className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm flex justify-between" onClick={() => { setTItems((it) => it.find((i) => i.product_id === p.id) ? it : [...it, { product_id: p.id, qty: 1 }]); setPq('') }}><span><b>{p.name}</b> <span className="text-xs text-slate-400 font-mono">{p.sku}</span></span><span className="text-xs text-slate-500">{avail(p)} disp.</span></button>)}</div>}
+          </div>
+          <table className="table"><thead><tr><th>Artículo</th><th>Disp.</th><th>Cant.</th><th className="text-right">P. unit.</th><th /></tr></thead><tbody>
+            {tItems.map((i) => { const p = prods.find((x) => x.id === i.product_id); const pu = Math.round(Number(p?.cost ?? 0) * (1 + markup / 100) * 100) / 100; return <tr key={i.product_id}><td className="text-sm">{p?.name}</td><td className="text-xs text-slate-500">{avail(p)}</td><td><input type="number" className="input h-8 w-20" min={1} max={avail(p)} value={i.qty} onChange={(e) => setTItems(tItems.map((x) => (x.product_id === i.product_id ? { ...x, qty: Math.min(avail(p), Math.max(1, Number(e.target.value))) } : x)))} /></td><td className="text-right text-sm">{money(pu)}</td><td><button type="button" className="btn-ghost h-7 w-7 p-0 text-slate-400 hover:text-rose-600" onClick={() => setTItems(tItems.filter((x) => x.product_id !== i.product_id))}><Trash2 size={13} /></button></td></tr> })}
+            {tItems.length === 0 && <tr><td colSpan={5} className="text-center text-xs text-slate-400 py-6">{prodQ.isLoading ? 'Cargando inventario…' : 'Busca y añade artículos con stock en la sucursal origen'}</td></tr>}
+          </tbody></table>
+          <div className="text-right text-sm text-slate-600">Subtotal {money(trSubtotal)} · ITBMS {money(trTax)} · <b className="text-slate-900">Total {money(trSubtotal + trTax)}</b></div>
+          {err && <div className="text-xs text-rose-600 font-semibold">{err}</div>}
+        </div> : <>
         <div className="space-y-2">{items.map((i, k) => <div key={k} className="grid grid-cols-[1fr_70px_110px_32px] gap-2"><input className="input h-9" placeholder="Descripción" value={i.description} onChange={(e) => setItems(items.map((x, j) => (j === k ? { ...x, description: e.target.value } : x)))} /><input type="number" className="input h-9" value={i.qty} onChange={(e) => setItems(items.map((x, j) => (j === k ? { ...x, qty: Number(e.target.value) } : x)))} /><input type="number" className="input h-9" value={i.unit_price} onChange={(e) => setItems(items.map((x, j) => (j === k ? { ...x, unit_price: Number(e.target.value) } : x)))} /><button className="btn-ghost h-9 w-8 p-0 text-slate-400" onClick={() => setItems(items.filter((_, j) => j !== k))}><Trash2 size={13} /></button></div>)}<button className="btn-secondary h-8 text-xs" onClick={() => setItems([...items, { description: '', qty: 1, unit_price: 0 }])}><Plus size={12} />Línea</button></div>
         <div className="text-right text-sm text-slate-600">Subtotal {money(subtotal)} · ITBMS {money(tax)} · <b className="text-slate-900">Total {money(subtotal + tax)}</b></div>
+        </>}
       </div>
     </Modal>
   )
