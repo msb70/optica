@@ -120,7 +120,7 @@ export default function Reportes() {
   return (
     <div className="space-y-4">
       <PageHeader title="Reportes y KPIs" subtitle={`${company?.legal_name} · ${months === 1 ? '1 mes' : `${months} meses`}${activeCount ? ` · ${activeCount} filtro(s) activo(s)` : ''}`} actions={<div className="flex items-center gap-2 no-print"><Tabs value={months} onChange={setMonths} items={[{ value: 1, label: '1 mes' }, { value: 3, label: '3 meses' }, { value: 6, label: '6 meses' }, { value: 12, label: '12 meses' }]} /><button className="btn-secondary" onClick={exportCsv}><Download size={15} />CSV</button><button className="btn-primary" onClick={exportPdf}><FileDown size={15} />PDF</button></div>} />
-      <Card className="p-3 no-print"><div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-500"><Filter size={13} />Filtros {activeCount > 0 && <button className="btn-ghost h-6 text-xs ml-auto" onClick={() => setF(EMPTY)}><X size={12} />Quitar filtros ({activeCount})</button>}</div>
+      <Card className="p-3 no-print relative z-20 !overflow-visible"><div className="flex items-center gap-2 mb-2 text-xs font-semibold text-slate-500"><Filter size={13} />Filtros {activeCount > 0 && <button className="btn-ghost h-6 text-xs ml-auto" onClick={() => setF(EMPTY)}><X size={12} />Quitar filtros ({activeCount})</button>}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">
           <MultiSelect label="Sucursal" options={opts.branches} value={f.branches} onChange={(x) => setF({ ...f, branches: x })} />
           <MultiSelect label="Vendedor" options={opts.sellers} value={f.sellers} onChange={(x) => setF({ ...f, sellers: x })} />
