@@ -61,18 +61,18 @@ const step = (v: number, d: number, s = 0.25) => Math.round((v + d * s) * 100) /
 
 function EyeRow({ label, eye, onChange, kid }: { label: string; eye: Eye; onChange: (e: Eye) => void; kid?: boolean }) {
   const num = (k: keyof Eye, s: number, min: number, max: number) => (
-    <div className="flex items-center rounded-lg border border-slate-200 bg-white">
-      <button type="button" className="h-9 w-7 text-slate-500 hover:bg-slate-50" onClick={() => onChange({ ...eye, [k]: Math.max(min, step(Number(eye[k] ?? 0), -1, s)) })}>−</button>
-      <input className="w-16 h-9 text-center font-mono text-sm outline-none" value={eye[k] ?? ''} onChange={(e) => onChange({ ...eye, [k]: e.target.value === '' ? undefined : Number(e.target.value) })} />
-      <button type="button" className="h-9 w-7 text-slate-500 hover:bg-slate-50" onClick={() => onChange({ ...eye, [k]: Math.min(max, step(Number(eye[k] ?? 0), 1, s)) })}>+</button>
+    <div className="flex items-center rounded-lg border border-slate-200 bg-white min-w-0">
+      <button type="button" className="h-9 w-7 shrink-0 text-slate-500 hover:bg-slate-50" onClick={() => onChange({ ...eye, [k]: Math.max(min, step(Number(eye[k] ?? 0), -1, s)) })}>−</button>
+      <input className="w-full min-w-0 h-9 text-center font-mono text-sm outline-none" value={eye[k] ?? ''} onChange={(e) => onChange({ ...eye, [k]: e.target.value === '' ? undefined : Number(e.target.value) })} />
+      <button type="button" className="h-9 w-7 shrink-0 text-slate-500 hover:bg-slate-50" onClick={() => onChange({ ...eye, [k]: Math.min(max, step(Number(eye[k] ?? 0), 1, s)) })}>+</button>
     </div>
   )
   return (
-    <div className="grid grid-cols-[40px_repeat(5,auto)] gap-2 items-center">
+    <div className="grid grid-cols-[40px_repeat(4,minmax(0,1fr))_88px] gap-2 items-center">
       <span className="font-bold text-slate-700">{label}</span>
       {num('sph', 0.25, -25, 25)}{num('cyl', 0.25, -10, 10)}{num('axis', 1, 0, 180)}
       {kid ? <span className="text-xs text-slate-400 text-center">—</span> : num('add', 0.25, 0, 4)}
-      <select className="input h-9 w-20 text-xs" value={eye.va ?? ''} onChange={(e) => onChange({ ...eye, va: e.target.value })}>{['20/20', '20/25', '20/30', '20/40', '20/50', '20/70', '20/100', '20/200'].map((v) => <option key={v}>{v}</option>)}</select>
+      <select className="input h-9 w-full text-xs" value={eye.va ?? ''} onChange={(e) => onChange({ ...eye, va: e.target.value })}>{['20/20', '20/25', '20/30', '20/40', '20/50', '20/70', '20/100', '20/200'].map((v) => <option key={v}>{v}</option>)}</select>
     </div>
   )
 }
@@ -80,7 +80,7 @@ function EyeRow({ label, eye, onChange, kid }: { label: string; eye: Eye; onChan
 function RxEditor({ title, rx, onChange, kid, actions }: { title: string; rx: Rx; onChange: (r: Rx) => void; kid?: boolean; actions?: React.ReactNode }) {
   return (
     <Card title={title} actions={actions}>
-      <div className="grid grid-cols-[40px_repeat(5,auto)] gap-2 text-[10px] uppercase font-semibold text-slate-400 mb-1 px-0"><span /><span className="text-center">Esfera</span><span className="text-center">Cilindro</span><span className="text-center">Eje</span><span className="text-center">Adición</span><span className="text-center">AV</span></div>
+      <div className="grid grid-cols-[40px_repeat(4,minmax(0,1fr))_88px] gap-2 text-[10px] uppercase font-semibold text-slate-400 mb-1 px-0"><span /><span className="text-center">Esfera</span><span className="text-center">Cilindro</span><span className="text-center">Eje</span><span className="text-center">Adición</span><span className="text-center">AV</span></div>
       <div className="space-y-2">
         <EyeRow label="OD" eye={rx.od ?? emptyEye()} onChange={(e) => onChange({ ...rx, od: e })} kid={kid} />
         <EyeRow label="OI" eye={rx.oi ?? emptyEye()} onChange={(e) => onChange({ ...rx, oi: e })} kid={kid} />
@@ -140,7 +140,7 @@ export function ExamenNuevo() {
         {prev && <div className="mt-3 rounded-xl bg-violet-50 border border-violet-100 p-3 flex flex-wrap items-center gap-3"><div className="text-xs font-semibold text-violet-700">RX anterior del paciente</div><div className="flex-1 min-w-[260px]"><RxTable rx={prev} compact /></div><button className="btn-secondary h-8 text-xs" onClick={() => { setIni(structuredClone(prev)); setFin(structuredClone(prev)) }}><Copy size={12} />Copiar como base</button></div>}
       </Card>
 
-      <div className="grid lg:grid-cols-3 gap-4">
+      <div className="grid gap-4">
         <RxEditor title="1 · Autorefracción" rx={auto} onChange={setAuto} kid={template === 'nino'} actions={<button className="btn-ghost h-7 text-xs" onClick={() => setIni(structuredClone(auto))}>Copiar a inicial <ArrowRight size={12} /></button>} />
         <RxEditor title="2 · Refracción inicial" rx={ini} onChange={setIni} kid={template === 'nino'} actions={<button className="btn-ghost h-7 text-xs" onClick={() => setFin(structuredClone(ini))}>Copiar a final <ArrowRight size={12} /></button>} />
         <RxEditor title="3 · RX final" rx={fin} onChange={setFin} kid={template === 'nino'} />
