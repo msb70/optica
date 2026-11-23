@@ -4,7 +4,7 @@ import { Spinner } from '../components/ui'
 
 export default function Login() {
   const { signIn, signUp } = useAuth()
-  const [mode, setMode] = useState<'in' | 'up'>('in')
+  const [mode] = useState<'in' | 'up'>('in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -42,7 +42,7 @@ export default function Login() {
           <label className="block mb-4"><span className="label">Contraseña</span><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} /></label>
           {err && <div className="mb-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm px-3 py-2">{err}</div>}
           <button className="btn-primary w-full h-11" disabled={busy}>{busy ? <Spinner className="text-white" /> : mode === 'in' ? 'Entrar' : 'Crear cuenta'}</button>
-          <button type="button" className="btn-ghost w-full mt-2 text-xs" onClick={() => { setMode(mode === 'in' ? 'up' : 'in'); setErr(null) }}>{mode === 'in' ? '¿Sin cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}</button>
+          <p className="mt-3 text-center text-xs text-slate-400">Las cuentas las crea el administrador de la óptica.</p>
         </form>
       </div>
     </div>

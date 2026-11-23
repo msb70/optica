@@ -19,7 +19,7 @@ export const fullName = (c?: { first_name?: string; last_name?: string } | null)
 
 export const SOURCES: Record<string, string> = { 'walk-in': 'Walk-in', referido: 'Referido', instagram: 'Instagram', google_ads: 'Google Ads', campania: 'Campaña', empresa: 'Empresa', doctor: 'Doctor', facebook: 'Facebook', web: 'Web' }
 export const CATEGORIES: Record<string, string> = { armazon: 'Armazón', lente: 'Lentes', lente_contacto: 'Lentes de contacto', solar: 'Solares', accesorio: 'Accesorios', servicio: 'Servicios' }
-export const METHODS: Record<string, string> = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', yappy: 'Yappy', vale: 'Vale', saldo_cliente: 'Saldo cliente', credito: 'Crédito' }
+export const METHODS: Record<string, string> = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', yappy: 'Yappy', vale: 'Vale', saldo_cliente: 'Saldo cliente', credito: 'Crédito', anticipo: 'Anticipo' }
 export const ROLES: Record<string, string> = { admin: 'Administrador', gerente: 'Gerente', vendedor: 'Vendedor', optometrista: 'Optometrista', cajero: 'Cajero', almacen: 'Almacén' }
 export const STATUS_LABEL: Record<string, string> = {
   completada: 'Completada', parcial: 'Pago parcial', anulada: 'Anulada', devuelta: 'Devuelta',
@@ -31,9 +31,14 @@ export const STATUS_LABEL: Record<string, string> = {
   sincronizado: 'Sincronizado', error: 'Error', omitido: 'Omitido', ok: 'OK', procesando: 'Procesando', descartado: 'Descartado',
   devolucion: 'Devolución', reparacion: 'Reparación', garantia: 'Garantía', cambio: 'Cambio',
   traspaso: 'Traspaso', orden_lab: 'Orden lab.', servicio: 'Servicio', manual: 'Manual',
+  abonada: 'Poco abono', aprobada: 'Orden de trabajo', lista: 'Lista para entregar',
 }
 export const STATUS_TONE: Record<string, string> = {
   completada: 'green', pagado: 'green', cobrado: 'green', entregado: 'green', convertida: 'green', resuelto: 'green', cerrado: 'slate', cerrada: 'slate', ok: 'green', sincronizado: 'green', aceptado: 'green', atendida: 'green', recibido: 'green', listo: 'green',
   parcial: 'amber', pendiente: 'amber', seguimiento: 'amber', abierta: 'blue', abierto: 'blue', en_revision: 'amber', en_reparacion: 'amber', emitido: 'blue', programada: 'blue', confirmada: 'blue', en_laboratorio: 'violet', enviado: 'violet', en_proceso: 'violet', control_calidad: 'violet', procesando: 'violet', aprobado: 'green', borrador: 'slate',
+  abonada: 'amber', aprobada: 'violet', lista: 'green',
   anulada: 'rose', devuelta: 'rose', perdida: 'rose', vencida: 'rose', rechazado: 'rose', cancelado: 'rose', cancelada: 'rose', error: 'rose', no_show: 'rose', descartado: 'slate', omitido: 'slate',
 }
+
+export const CARD_BRANDS = ['Visa', 'Mastercard', 'Diners Club', 'American Express']
+export const normPhone = (p?: string | null) => (p ?? '').replace(/\D/g, '')

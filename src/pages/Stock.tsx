@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Search, ArrowLeftRight, ClipboardList, Tag, Send, PackageCheck, Plus, Trash2, AlertTriangle, Printer } from 'lucide-react'
+import { Search, ArrowLeftRight, ClipboardList, Tag, Send, PackageCheck, Plus, Trash2, AlertTriangle, Printer, Upload } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { gql } from '../lib/nhost'
 import { Card, PageHeader, Loading, StatusBadge, Modal, Field, Tabs, Badge, Empty, Toast, KPI } from '../components/ui'
 import { money, fdate, CATEGORIES, num } from '../lib/format'
 import type { Product, Transfer } from '../lib/types'
+import ImportInventory from '../components/ImportInventory'
 
 const STOCK_Q = `query Stock($branch: uuid!) { products(where:{active:{_eq:true}, track_stock:{_eq:true}}, order_by:[{category:asc},{name:asc}]) { id sku barcode name category brand model color cost price min_stock track_stock active stock(where:{branch_id:{_eq:$branch}}) { qty last_count_at } }
   moves: stock_movements(where:{branch_id:{_eq:$branch}}, order_by:{created_at:desc}, limit: 40) { id qty type note created_at product { name sku } staff { name } } }`
@@ -30,6 +31,7 @@ export default function Stock() {
   const [adjust, setAdjust] = useState<P | null>(null)
   const [adj, setAdj] = useState({ qty: 0, note: '' })
   const [newT, setNewT] = useState(false)
+  const [imp, setImp] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [count, setCount] = useState<Record<string, number>>({})
   const q = useQuery({ queryKey: ['stock', branch?.id], queryFn: () => gql<{ products: P[]; moves: { id: string; qty: number; type: string; note?: string; created_at: string; product: { name: string; sku: string }; staff?: { name: string } }[] }>(STOCK_Q, { branch: branch!.id }), enabled: !!branch })
@@ -49,7 +51,7 @@ export default function Stock() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Almacén & Stock" subtitle={`${branch?.name} · stock por sucursal, traspasos, conteos y etiquetas`} actions={<><button className="btn-secondary" onClick={() => setLabels(rows.slice(0, 24))}><Tag size={15} />Etiquetas</button><button className="btn-primary" onClick={() => setNewT(true)}><ArrowLeftRight size={15} />Nuevo traspaso</button></>} />
+      <PageHeader title="Almacén & Stock" subtitle={`${branch?.name} · stock por sucursal, traspasos, conteos y etiquetas`} actions={<><button className="btn-secondary" onClick={() => setImp(true)}><Upload size={15} />Importar</button><button className="btn-secondary" onClick={() => setLabels(rows.slice(0, 24))}><Tag size={15} />Etiquetas</button><button className="btn-primary" onClick={() => setNewT(true)}><ArrowLeftRight size={15} />Nuevo traspaso</button></>} />
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KPI label="Unidades" value={num(totals.units)} tone="blue" />
         <KPI label="Valor a costo" value={money(totals.value)} tone="slate" />
@@ -109,6 +111,7 @@ export default function Stock() {
       </Modal>
 
       {newT && <NuevoTraspaso onClose={() => setNewT(false)} onCreated={(n) => { setNewT(false); setToast(`Traspaso ${n} creado en borrador`); setTab('traspasos'); refresh() }} products={products} fromBranchId={branch!.id} branches={branches} companies={companies} requesterId={me?.id ?? null} />}
+      <ImportInventory open={imp} onClose={() => setImp(false)} onDone={(m) => { setImp(false); setToast(m); refresh() }} branchId={branch!.id} branchName={branch?.name ?? ''} staffId={me?.id ?? null} />
       <Toast msg={toast} onClose={() => setToast(null)} />
     </div>
   )

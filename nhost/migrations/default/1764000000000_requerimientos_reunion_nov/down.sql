@@ -1,0 +1,1 @@
+-- Migración aditiva: no se revierte automáticamente para no perder anticipos ni datos de garantía.

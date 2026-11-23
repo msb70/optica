@@ -35,7 +35,8 @@ clientUrl = 'https://optica-ocui.onrender.com'
 allowedUrls = ['https://optica-ocui.onrender.com', 'http://localhost:5173', 'http://localhost:4173']
 
 [auth.signUp]
-enabled = true
+# R12: alta de usuarios solo por el administrador (Nhost → Auth → Users)
+enabled = false
 disableNewUsers = false
 
 [auth.user]

@@ -6,7 +6,7 @@ import { Search, Plus, Minus, Trash2, UserPlus, CreditCard, Banknote, Smartphone
 import { useApp } from '../lib/app'
 import { gql } from '../lib/nhost'
 import { Modal, Badge, Field, Toast, Avatar } from '../components/ui'
-import { money, CATEGORIES, METHODS, SOURCES, fullName } from '../lib/format'
+import { money, CATEGORIES, METHODS, SOURCES, fullName, normPhone } from '../lib/format'
 import type { Product, Customer, Quote } from '../lib/types'
 
 const PRODUCTS_Q = `query PosProducts($branch: uuid!) { products(where:{active:{_eq:true}}, order_by:[{name:asc}]) { id sku barcode name category brand model color cost price min_stock track_stock active stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
@@ -91,6 +91,8 @@ export default function POS() {
   const base = Math.max(0, subtotal - discount)
   const tax = Math.round(base * taxRate * 100) / 100
   const total = Math.round((base + tax) * 100) / 100
+  const noStock = lines.filter((l) => l.product.track_stock && l.qty > Number((l.product as PosProduct).stock?.[0]?.qty ?? 0))
+  const stockBlocked = noStock.length > 0 && company?.allow_negative_stock === false
   const paid = pays.reduce((a, p) => a + p.amount, 0)
   const pending = Math.round((total - paid) * 100) / 100
   const maxDisc = Number(sellers.find((s) => s.id === sellerId)?.max_discount_pct ?? me?.max_discount_pct ?? 0)
@@ -199,7 +201,8 @@ export default function POS() {
           {discBlocked && <div className="text-[11px] text-rose-600 font-semibold">Descuento supera el permiso del vendedor ({maxDisc}%). Requiere gerente/admin.</div>}
           <div className="flex justify-between text-slate-600"><span>ITBMS {company?.tax_rate}%</span><span>{currency(tax)}</span></div>
           <div className="flex justify-between text-xl font-extrabold text-slate-900 pt-1"><span>Total</span><span>{currency(total)}</span></div>
-          <button className="btn-primary w-full h-12 text-base mt-2" disabled={!lines.length || !customer || discBlocked} onClick={() => { setPays([]); setPayOpen(true) }}>Cobrar {currency(total)} <span className="kbd ml-1 border-white/30 bg-white/10 text-white">F9</span></button>
+          {noStock.length > 0 && <div className={clsx('rounded-xl px-3 py-2 text-[11px]', stockBlocked ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-800')}>{stockBlocked ? 'Sin stock suficiente (la compañía no permite vender en cero): ' : 'Se venderá sin stock en esta sucursal (quedará en negativo para regularizar): '}<b>{noStock.map((l) => l.product.name).join(', ')}</b></div>}
+          <button className="btn-primary w-full h-12 text-base mt-2" disabled={!lines.length || !customer || discBlocked || stockBlocked} onClick={() => { setPays([]); setPayOpen(true) }}>Cobrar {currency(total)} <span className="kbd ml-1 border-white/30 bg-white/10 text-white">F9</span></button>
           {!customer && lines.length > 0 && <div className="text-[11px] text-amber-600 text-center">Selecciona un cliente para cobrar</div>}
         </div>
       </aside>
@@ -260,7 +263,7 @@ function PayForm({ total, pays, setPays, pending, customer, companyId, currency 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-2">
-        {Object.keys(METHODS).filter((m) => m !== 'credito').map((m) => <button key={m} onClick={() => { setMethod(m); setBrand(''); setRef(''); setAmount(Math.max(0, pending)) }} className={clsx('rounded-xl border p-2.5 text-xs font-semibold flex flex-col items-center gap-1 transition', method === m ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{METHOD_ICON[m]}{METHODS[m]}</button>)}
+        {Object.keys(METHODS).filter((m) => m !== 'credito' && m !== 'anticipo').map((m) => <button key={m} onClick={() => { setMethod(m); setBrand(''); setRef(''); setAmount(Math.max(0, pending)) }} className={clsx('rounded-xl border p-2.5 text-xs font-semibold flex flex-col items-center gap-1 transition', method === m ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{METHOD_ICON[m]}{METHODS[m]}</button>)}
       </div>
       {method === 'tarjeta' && <div><div className="label">Tarjeta</div><div className="grid grid-cols-4 gap-2">{CARD_BRANDS.map((b) => <button key={b} type="button" onClick={() => setBrand(b)} className={clsx('rounded-xl border px-2 py-2 text-xs font-semibold transition', brand === b ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-slate-200 hover:border-slate-300 text-slate-600')}>{b}</button>)}</div></div>}
       {method === 'vale' && <div className="flex gap-2"><input className="input" placeholder="Código del vale (VALE-2026-0001)" value={voucherCode} onChange={(e) => setVoucherCode(e.target.value)} /><button className="btn-secondary shrink-0" onClick={lookupVoucher}>Validar</button></div>}
@@ -293,25 +296,35 @@ export function NewCustomerModal({ open, onClose, initial = '', companyId, branc
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   useEffect(() => { if (open) { const [a, ...b] = initial.split(' '); setF((x) => ({ ...x, first_name: /\d/.test(initial) ? '' : a, last_name: b.join(' '), phone: /\d/.test(initial) ? initial : '' })) } }, [open, initial])
+  const [dupe, setDupe] = useState<Customer | null>(null)
+  const phoneOk = normPhone(f.phone).length >= 7
+  const checkDupe = async (phone: string) => {
+    const n = normPhone(phone); if (n.length < 7) { setDupe(null); return null }
+    const r = await gql<{ customers: Customer[] }>(`query Dupe($c: uuid!, $p: String!) { customers(where:{company_id:{_eq:$c}, phone_norm:{_eq:$p}}, limit:1) { id code first_name last_name phone email balance source tax_id } }`, { c: companyId, p: n })
+    setDupe(r.customers[0] ?? null); return r.customers[0] ?? null
+  }
   const save = async () => {
     setBusy(true); setErr(null)
     try {
+      if (await checkDupe(f.phone)) { setErr('Ya existe un cliente con ese teléfono'); return }
       const code = 'C' + String(Date.now()).slice(-7)
       const r = await gql<{ insert_customers_one: Customer }>(NEW_CUSTOMER, { o: { ...f, birth_date: f.birth_date || null, email: f.email || null, tax_id: f.tax_id || null, company_id: companyId, branch_id: branchId, code } })
       onCreated(r.insert_customers_one)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   return (
-    <Modal open={open} onClose={onClose} title="Nuevo cliente" size="md" footer={<><button className="btn-secondary" onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={busy || !f.first_name || !f.last_name} onClick={save}>Guardar</button></>}>
+    <Modal open={open} onClose={onClose} title="Nuevo cliente" size="md" footer={<><button className="btn-secondary" onClick={onClose}>Cancelar</button><button className="btn-primary" disabled={busy || !f.first_name || !f.last_name || !phoneOk || !!dupe} onClick={save}>Guardar</button></>}>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Nombre"><input className="input" value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} autoFocus /></Field>
         <Field label="Apellidos"><input className="input" value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} /></Field>
-        <Field label="Teléfono"><input className="input" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        <Field label="Teléfono (identifica al cliente)"><input className="input" value={f.phone} onChange={(e) => { setF({ ...f, phone: e.target.value }); setDupe(null) }} onBlur={(e) => { void checkDupe(e.target.value) }} placeholder="6000-0000" /></Field>
         <Field label="Email"><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="Cédula / RUC"><input className="input" value={f.tax_id} onChange={(e) => setF({ ...f, tax_id: e.target.value })} /></Field>
+        <Field label="Cédula / RUC (opcional)"><input className="input" value={f.tax_id} onChange={(e) => setF({ ...f, tax_id: e.target.value })} /></Field>
         <Field label="Fecha de nacimiento"><input className="input" type="date" value={f.birth_date} onChange={(e) => setF({ ...f, birth_date: e.target.value })} /></Field>
         <Field label="Origen" className="sm:col-span-2"><select className="input" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>{Object.entries(SOURCES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
       </div>
+      {dupe && <div className="mt-3 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">Este teléfono ya pertenece a <b>{dupe.first_name} {dupe.last_name}</b> ({dupe.code}).<button className="btn-secondary h-7 text-xs ml-auto" onClick={() => onCreated(dupe)}>Usar este cliente</button></div>}
+      {!phoneOk && f.phone && <div className="mt-2 text-[11px] text-slate-500">El teléfono es obligatorio (mínimo 7 dígitos).</div>}
       {err && <div className="mt-3 text-xs text-rose-600">{err}</div>}
       <div className="mt-3 text-[11px] text-slate-400">Al guardar se encola la creación del Contact en Zoho CRM.</div>
     </Modal>

@@ -2,27 +2,32 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
-import { Plus, ShoppingCart, PhoneCall, XCircle, Trash2, Clock, Search } from 'lucide-react'
+import { Plus, ShoppingCart, PhoneCall, XCircle, Trash2, Clock, Search, HandCoins, PackageCheck } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { gql } from '../lib/nhost'
 import { Card, PageHeader, Loading, StatusBadge, Avatar, Tabs, Modal, Field, Empty, Toast, Badge } from '../components/ui'
 import RxTable from '../components/RxTable'
+import PayModal, { type Pay } from '../components/PayModal'
 import { money, fdate, fullName, ago, CATEGORIES } from '../lib/format'
 import type { Quote, Product, Customer, Rx } from '../lib/types'
 
-const LIST = `query Quotes($branch: uuid!, $status: [String!]) { quotes(where:{branch_id:{_eq:$branch}, status:{_in:$status}}, order_by:{created_at:desc}, limit: 120) { id number status subtotal discount tax total valid_until next_followup_at last_contact_at lost_reason created_at customer_id customer { id first_name last_name phone } seller { name } exam_id quote_items { id description qty unit_price discount_pct line_total } }
+const LIST = `query Quotes($branch: uuid!, $status: [String!]) { quotes(where:{branch_id:{_eq:$branch}, status:{_in:$status}}, order_by:{created_at:desc}, limit: 120) { id number status subtotal discount tax total deposit_total approved_at ready_at lab_orders { id number status promised_at } valid_until next_followup_at last_contact_at lost_reason created_at customer_id customer { id first_name last_name phone } seller { name } exam_id quote_items { id description qty unit_price discount_pct line_total } }
   counts: quotes(where:{branch_id:{_eq:$branch}}) { status } }`
 const FOLLOW = `mutation Follow($id: uuid!, $set: quotes_set_input!) { update_quotes_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
 const PRODUCTS = `query QProducts { products(where:{active:{_eq:true}}, order_by:[{category:asc},{name:asc}]) { id sku name category brand price cost } }`
 const CUST = `query QCust($id: uuid!, $examFilter: exams_bool_exp!) { customers_by_pk(id:$id) { id code first_name last_name phone } exams(where:$examFilter, order_by:{exam_date:desc}, limit:1) { id exam_date rx_final recommendation diagnosis } }`
+const DEPOSIT = `mutation Dep($id: uuid!, $p: jsonb!, $s: uuid, $st: uuid) { add_quote_deposit(args:{p_quote_id:$id, p_payments:$p, p_cash_session_id:$s, p_staff_id:$st}) { id number status deposit_total } }`
+export const DELIVER = `mutation Deliver($id: uuid!, $p: jsonb!, $s: uuid, $st: uuid) { deliver_quote(args:{p_quote_id:$id, p_payments:$p, p_cash_session_id:$s, p_staff_id:$st}) { id number total paid } }`
 const INSERT = `mutation NewQuote($o: quotes_insert_input!) { insert_quotes_one(object:$o) { id number } }`
 
-type Tab = 'activas' | 'seguimiento' | 'convertidas' | 'perdidas' | 'todas'
-const TAB_STATUS: Record<Tab, string[]> = { activas: ['abierta', 'seguimiento'], seguimiento: ['seguimiento'], convertidas: ['convertida'], perdidas: ['perdida', 'vencida'], todas: ['abierta', 'seguimiento', 'convertida', 'perdida', 'vencida'] }
+type Tab = 'activas' | 'seguimiento' | 'ordenes' | 'convertidas' | 'perdidas' | 'todas'
+const TAB_STATUS: Record<Tab, string[]> = { activas: ['abierta', 'seguimiento'], seguimiento: ['seguimiento'], ordenes: ['abonada', 'aprobada', 'lista'], convertidas: ['convertida'], perdidas: ['perdida', 'vencida'], todas: ['abierta', 'seguimiento', 'abonada', 'aprobada', 'lista', 'convertida', 'perdida', 'vencida'] }
 
 export default function Cotizaciones() {
-  const { branch, currency } = useApp()
+  const { branch, currency, company, cashSession, me } = useApp()
   const [params, setParams] = useSearchParams()
+  const [dep, setDep] = useState<Quote | null>(null)
+  const [del, setDel] = useState<Quote | null>(null)
   const nav = useNavigate()
   const [tab, setTab] = useState<Tab>('activas')
   const [search, setSearch] = useState('')
@@ -41,9 +46,9 @@ export default function Cotizaciones() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Cotizaciones / Proformas" subtitle={`${branch?.name} · conversión a venta en 1 clic`} actions={<button className="btn-primary" onClick={() => setParams({ new: '' })}><Plus size={15} />Nueva cotización</button>} />
+      <PageHeader title="Cotizaciones / Proformas" subtitle={`${branch?.name} · cotización → anticipo (mín. ${company?.min_deposit_pct ?? 50}%) → orden de trabajo → entrega y factura`} actions={<button className="btn-primary" onClick={() => setParams({ new: '' })}><Plus size={15} />Nueva cotización</button>} />
       <div className="flex flex-wrap items-center gap-2 justify-between">
-        <Tabs value={tab} onChange={setTab} items={[{ value: 'activas', label: 'Activas', count: (counts.abierta ?? 0) + (counts.seguimiento ?? 0) }, { value: 'seguimiento', label: 'En seguimiento', count: counts.seguimiento ?? 0 }, { value: 'convertidas', label: 'Convertidas', count: counts.convertida ?? 0 }, { value: 'perdidas', label: 'Perdidas / vencidas', count: (counts.perdida ?? 0) + (counts.vencida ?? 0) }, { value: 'todas', label: 'Todas' }]} />
+        <Tabs value={tab} onChange={setTab} items={[{ value: 'activas', label: 'Activas', count: (counts.abierta ?? 0) + (counts.seguimiento ?? 0) }, { value: 'seguimiento', label: 'En seguimiento', count: counts.seguimiento ?? 0 }, { value: 'ordenes', label: 'Órdenes de trabajo', count: (counts.abonada ?? 0) + (counts.aprobada ?? 0) + (counts.lista ?? 0) }, { value: 'convertidas', label: 'Facturadas', count: counts.convertida ?? 0 }, { value: 'perdidas', label: 'Perdidas / vencidas', count: (counts.perdida ?? 0) + (counts.vencida ?? 0) }, { value: 'todas', label: 'Todas' }]} />
         <div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className="input pl-8 h-9 w-64" placeholder="Buscar…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       </div>
       <Card padded={false}>
@@ -60,11 +65,16 @@ export default function Cotizaciones() {
                 <td className="text-xs text-slate-500">{fdate(x.created_at)}<div className="text-[10px]">vence {fdate(x.valid_until)}</div></td>
                 <td className="text-xs">{['abierta', 'seguimiento'].includes(x.status) ? <span className={clsx('inline-flex items-center gap-1', overdue ? 'text-amber-700 font-semibold' : 'text-slate-500')}><Clock size={11} />{x.next_followup_at ? ago(x.next_followup_at) : 'sin programar'}</span> : x.lost_reason ? <Badge tone="rose">{x.lost_reason}</Badge> : '—'}</td>
                 <td><StatusBadge status={x.status} /></td>
-                <td className="text-right font-semibold">{money(x.total)}</td>
+                <td className="text-right font-semibold">{money(x.total)}{Number(x.deposit_total ?? 0) > 0 && <div className="text-[11px] font-normal text-emerald-700">abonado {money(x.deposit_total)} · saldo {money(Number(x.total) - Number(x.deposit_total))}</div>}{x.lab_orders?.[0] && <div className="text-[10px] font-normal text-violet-700">{x.lab_orders[0].number} · {x.lab_orders[0].status}</div>}</td>
                 <td><div className="flex gap-1 justify-end">{['abierta', 'seguimiento'].includes(x.status) && <>
                   <button className="btn-secondary h-8 text-xs" onClick={() => setFollow(x)} title="Registrar contacto"><PhoneCall size={13} /></button>
                   <button className="btn-ghost h-8 text-xs text-rose-600" onClick={() => setLose(x)} title="Marcar perdida"><XCircle size={13} /></button>
-                  <button className="btn-primary h-8 text-xs" onClick={() => nav(`/pos?quote=${x.id}`)}><ShoppingCart size={13} />Convertir</button>
+                  <button className="btn-secondary h-8 text-xs" onClick={() => setDep(x)} title="Registrar anticipo y aprobar"><HandCoins size={13} />Anticipo</button>
+                  <button className="btn-primary h-8 text-xs" onClick={() => nav(`/pos?quote=${x.id}`)} title="Venta directa (sin orden de trabajo)"><ShoppingCart size={13} />Venta directa</button>
+                </>}
+                {['abonada', 'aprobada', 'lista'].includes(x.status) && <>
+                  <button className="btn-secondary h-8 text-xs" onClick={() => setDep(x)}><HandCoins size={13} />Abonar</button>
+                  <button className="btn-primary h-8 text-xs" onClick={() => setDel(x)}><PackageCheck size={13} />Entregar y facturar</button>
                 </>}</div></td>
               </tr>
             })}</tbody>
@@ -79,6 +89,15 @@ export default function Cotizaciones() {
       <Modal open={!!lose} onClose={() => setLose(null)} title={`Marcar como perdida · ${lose?.number}`} size="sm" footer={<><button className="btn-secondary" onClick={() => setLose(null)}>Cancelar</button><button className="btn-danger" onClick={doLose}>Marcar perdida</button></>}>
         <Field label="Motivo"><select className="input" value={reason} onChange={(e) => setReason(e.target.value)}>{['Precio', 'Compró en otra óptica', 'Sin respuesta', 'Pospuso la compra', 'Otro'].map((r) => <option key={r}>{r}</option>)}</select></Field>
       </Modal>
+      <PayModal open={!!dep} title={`Anticipo · ${dep?.number ?? ''}`} currency={currency} confirmLabel="Registrar anticipo"
+        suggested={dep ? Math.max(0, Math.round(Number(dep.total) * Number(company?.min_deposit_pct ?? 50)) / 100 - Number(dep.deposit_total ?? 0)) : 0}
+        maxAmount={dep ? Number(dep.total) - Number(dep.deposit_total ?? 0) : undefined}
+        subtitle={dep && <>Total {money(dep.total)} · ya abonado {money(dep.deposit_total ?? 0)}. Con un anticipo de al menos el <b>{company?.min_deposit_pct ?? 50}%</b> pasa a <b>orden de trabajo</b> y se manda a hacer; por debajo queda en el cajón como “poco abono”. La factura se emite al entregar.</>}
+        onClose={() => setDep(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ add_quote_deposit: { number: string; status: string }[] }>(DEPOSIT, { id: dep!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); const st = r.add_quote_deposit[0]?.status; setDep(null); setToast(st === 'aprobada' ? `${dep!.number}: orden de trabajo aprobada${dep!.lab_orders?.length ? '' : ' (orden de laboratorio generada si lleva cristales)'}` : `${dep!.number}: anticipo registrado · queda en poco abono`); void q.refetch() }} />
+      <PayModal open={!!del} title={`Entregar y facturar · ${del?.number ?? ''}`} currency={currency} confirmLabel="Facturar"
+        suggested={del ? Number(del.total) - Number(del.deposit_total ?? 0) : 0} maxAmount={del ? Number(del.total) - Number(del.deposit_total ?? 0) : undefined}
+        subtitle={del && <>Se emite la factura por {money(del.total)} aplicando {money(del.deposit_total ?? 0)} de anticipos. Saldo a cobrar: <b>{money(Number(del.total) - Number(del.deposit_total ?? 0))}</b>.{del.lab_orders?.some((o) => o.status !== 'listo' && o.status !== 'entregado') && <span className="block mt-1 text-amber-700">Atención: la orden de laboratorio aún no está lista.</span>}</>}
+        onClose={() => setDel(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ deliver_quote: { number: string }[] }>(DELIVER, { id: del!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); setDel(null); setToast(`Entregado · factura ${r.deliver_quote[0]?.number}`); void q.refetch() }} />
       {newFor !== null && <NuevaCotizacion customerId={newFor} examId={params.get('exam')} onClose={() => setParams({})} onCreated={(n) => { setParams({}); setToast(`Cotización ${n} creada`); void q.refetch() }} currency={currency} />}
       <Toast msg={toast} onClose={() => setToast(null)} />
     </div>

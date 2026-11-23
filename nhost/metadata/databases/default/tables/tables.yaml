@@ -50,3 +50,7 @@
 - "!include storage_buckets.yaml"
 - "!include storage_files.yaml"
 - "!include storage_virus.yaml"
+- "!include public_consult_reasons.yaml"
+- "!include public_suppliers.yaml"
+- "!include public_staff_branches.yaml"
+- "!include public_quote_deposits.yaml"

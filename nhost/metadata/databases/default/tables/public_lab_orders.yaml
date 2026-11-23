@@ -2,6 +2,9 @@ table:
   name: lab_orders
   schema: public
 object_relationships:
+- name: quote
+  using:
+    foreign_key_constraint_on: quote_id
 - name: branch
   using:
     foreign_key_constraint_on: branch_id

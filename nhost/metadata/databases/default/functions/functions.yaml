@@ -33,3 +33,24 @@
     exposed_as: mutation
   permissions:
   - role: user
+- function:
+    name: add_quote_deposit
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: deliver_quote
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user
+- function:
+    name: rma_replace
+    schema: public
+  configuration:
+    exposed_as: mutation
+  permissions:
+  - role: user

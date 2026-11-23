@@ -15,6 +15,13 @@ object_relationships:
   using:
     foreign_key_constraint_on: opened_by
 array_relationships:
+- name: quote_deposits
+  using:
+    foreign_key_constraint_on:
+      column: cash_session_id
+      table:
+        name: quote_deposits
+        schema: public
 - name: cash_movements
   using:
     foreign_key_constraint_on:

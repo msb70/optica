@@ -91,6 +91,7 @@ function RxEditor({ title, rx, onChange, kid, actions }: { title: string; rx: Rx
 }
 
 export function ExamenNuevo() {
+  const reasonsQ = useQuery({ queryKey: ['consult-reasons'], queryFn: () => gql<{ consult_reasons: { id: string; name: string }[] }>(`query Reasons { consult_reasons(where:{active:{_eq:true}}, order_by:[{sort:asc},{name:asc}]) { id name } }`), staleTime: 300_000 })
   const { company, branch, staff, me } = useApp()
   const nav = useNavigate()
   const [params] = useSearchParams()
@@ -135,7 +136,7 @@ export function ExamenNuevo() {
                 {custQ.length >= 2 && <div className="absolute z-20 mt-1 w-full card p-1">{(custs.data?.customers ?? []).map((c) => <button key={c.id} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm" onClick={() => { setCustomer(c); setCustQ(''); nav(`/examenes/nuevo?customer=${c.id}`, { replace: true }) }}><b>{fullName(c)}</b> <span className="text-xs text-slate-500">{c.code} · {c.phone}</span></button>)}</div>}</>}
           </div>
           <Field label="Optometrista"><select className="input h-10" value={opto} onChange={(e) => setOpto(e.target.value)}><option value="">—</option>{staff.filter((s) => s.role === 'optometrista').map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-          <Field label="Motivo de consulta"><input className="input h-10" list="reasons" value={reason} onChange={(e) => setReason(e.target.value)} /><datalist id="reasons">{['Revisión anual', 'Visión borrosa de lejos', 'Visión borrosa de cerca', 'Dolor de cabeza', 'Fatiga visual por pantallas', 'Renovación de lentes', 'Control pediátrico'].map((r) => <option key={r} value={r} />)}</datalist></Field>
+          <Field label="Motivo de consulta"><input className="input h-10" list="reasons" value={reason} onChange={(e) => setReason(e.target.value)} /><datalist id="reasons">{(reasonsQ.data?.consult_reasons ?? []).map((r) => <option key={r.id} value={r.name} />)}</datalist></Field>
         </div>
         {prev && <div className="mt-3 rounded-xl bg-violet-50 border border-violet-100 p-3 flex flex-wrap items-center gap-3"><div className="text-xs font-semibold text-violet-700">RX anterior del paciente</div><div className="flex-1 min-w-[260px]"><RxTable rx={prev} compact /></div><button className="btn-secondary h-8 text-xs" onClick={() => { setIni(structuredClone(prev)); setFin(structuredClone(prev)) }}><Copy size={12} />Copiar como base</button></div>}
       </Card>

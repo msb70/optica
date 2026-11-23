@@ -11,7 +11,8 @@ import type { CashSession } from '../lib/types'
 const Q = `query Caja($branch: uuid!) {
   open: cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"abierta"}}, order_by:{opened_at:desc}, limit:1) { id opened_at opening_amount status notes opener { name }
     cash_movements(order_by:{created_at:desc}) { id type amount concept created_at }
-    payments(order_by:{created_at:desc}) { id method amount reference created_at sale { number customer { first_name last_name } } } }
+    payments(order_by:{created_at:desc}) { id method amount reference created_at sale { number customer { first_name last_name } } }
+    quote_deposits(order_by:{created_at:desc}) { id method amount reference created_at quote { number customer { first_name last_name } } } }
   history: cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"cerrada"}}, order_by:{opened_at:desc}, limit:30) { id opened_at closed_at opening_amount expected_cash counted_cash difference status notes opener { name } closer { name }
     payments_aggregate { aggregate { sum { amount } count } } }
 }`
@@ -20,7 +21,7 @@ const CLOSE = `mutation Close($id: uuid!, $counted: numeric!, $staff: uuid, $not
 const MOVE = `mutation Move($o: cash_movements_insert_input!) { insert_cash_movements_one(object:$o) { id } }`
 
 type OpenPayment = { id: string; method: string; amount: number; reference?: string; created_at: string; sale?: { number: string; customer?: { first_name: string; last_name: string } } }
-type Open = Omit<CashSession, 'payments'> & { payments: OpenPayment[] }
+type Open = Omit<CashSession, 'payments'> & { payments: OpenPayment[]; quote_deposits?: { id: string; method: string; amount: number; reference?: string; created_at: string; quote?: { number: string; customer?: { first_name: string; last_name: string } } }[] }
 type Hist = CashSession & { closer?: { name: string }; payments_aggregate: { aggregate: { sum: { amount: number | null }; count: number } } }
 
 export default function Caja() {
@@ -39,7 +40,9 @@ export default function Caja() {
   const refresh = () => { void q.refetch(); refreshCash(); void qc.invalidateQueries({ queryKey: ['alerts'] }) }
 
   if (q.isLoading) return <Loading />
-  const s = q.data?.open[0]
+  const raw = q.data?.open[0]
+  // los anticipos de órdenes de trabajo entran en la caja del día como cualquier cobro
+  const s = raw ? { ...raw, payments: [...raw.payments, ...(raw.quote_deposits ?? []).map((d) => ({ id: d.id, method: d.method, amount: d.amount, reference: d.reference ? `Anticipo · ${d.reference}` : 'Anticipo', created_at: d.created_at, sale: { number: d.quote?.number ?? '', customer: d.quote?.customer } }))].sort((a, b) => b.created_at.localeCompare(a.created_at)) } : undefined
   const byMethod = (s?.payments ?? []).reduce<Record<string, number>>((a, p) => { a[p.method] = (a[p.method] ?? 0) + Number(p.amount); return a }, {})
   const ingresos = (s?.cash_movements ?? []).filter((m) => m.type === 'ingreso').reduce((a, m) => a + Number(m.amount), 0)
   const egresos = (s?.cash_movements ?? []).filter((m) => m.type === 'egreso').reduce((a, m) => a + Number(m.amount), 0)

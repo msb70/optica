@@ -23,9 +23,9 @@ interface AppCtx {
 
 const Ctx = createContext<AppCtx | null>(null)
 
-const ORG_QUERY = `query Org { companies(order_by:{code:asc}) { id code legal_name trade_name tax_id country currency tax_rate invoice_prefix zoho_org_id active }
-  branches(order_by:{name:asc}) { id company_id code name address phone monthly_goal active }
-  staff(where:{active:{_eq:true}}, order_by:{name:asc}) { id user_id company_id branch_id name email role commission_pct max_discount_pct monthly_goal active } }`
+const ORG_QUERY = `query Org { companies(order_by:{code:asc}) { id code legal_name trade_name tax_id country currency tax_rate invoice_prefix zoho_org_id active allow_negative_stock min_deposit_pct warranty_frame_months warranty_lens_months }
+  branches(order_by:{name:asc}) { id company_id code name address phone monthly_goal active zoho_scope zoho_org_id zoho_tag }
+  staff(where:{active:{_eq:true}}, order_by:{name:asc}) { id user_id company_id branch_id name email role commission_pct max_discount_pct monthly_goal active staff_branches { branch_id } } }`
 
 const CASH_QUERY = `query OpenCash($branch: uuid!) { cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"abierta"}}, order_by:{opened_at:desc}, limit:1) {
   id company_id branch_id opened_by opened_at closed_at opening_amount expected_cash counted_cash difference status notes opener { id name } } }`
@@ -33,9 +33,22 @@ const CASH_QUERY = `query OpenCash($branch: uuid!) { cash_sessions(where:{branch
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const org = useQuery({ queryKey: ['org'], queryFn: () => gql<{ companies: Company[]; branches: Branch[]; staff: Staff[] }>(ORG_QUERY), staleTime: 60_000 })
-  const companies = org.data?.companies ?? []
-  const branches = org.data?.branches ?? []
+  const allCompanies = org.data?.companies ?? []
+  const allBranches = org.data?.branches ?? []
   const staff = org.data?.staff ?? []
+  // R12: cada usuario solo ve sus sucursales (el administrador ve todas)
+  const meEarly = useMemo(() => {
+    if (!user) return null
+    return staff.find((s) => s.user_id === user.id) || staff.find((s) => s.email && s.email.toLowerCase() === (user.email || '').toLowerCase()) || null
+  }, [staff, user])
+  const allowed = useMemo(() => {
+    if (!meEarly || meEarly.role === 'admin') return null
+    const ids = new Set((meEarly.staff_branches ?? []).map((b) => b.branch_id))
+    if (!ids.size && meEarly.branch_id) ids.add(meEarly.branch_id)
+    return ids
+  }, [meEarly])
+  const branches = useMemo(() => (allowed ? allBranches.filter((b) => allowed.has(b.id)) : allBranches), [allBranches, allowed])
+  const companies = useMemo(() => (allowed ? allCompanies.filter((c) => branches.some((b) => b.company_id === c.id)) : allCompanies), [allCompanies, branches, allowed])
 
   const [companyId, setCompanyIdState] = useState<string>(() => localStorage.getItem('optilux.company') || '')
   const [branchId, setBranchIdState] = useState<string>(() => localStorage.getItem('optilux.branch') || '')

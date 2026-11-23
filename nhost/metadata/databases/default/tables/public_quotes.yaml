@@ -18,6 +18,20 @@ object_relationships:
   using:
     foreign_key_constraint_on: seller_id
 array_relationships:
+- name: lab_orders
+  using:
+    foreign_key_constraint_on:
+      column: quote_id
+      table:
+        name: lab_orders
+        schema: public
+- name: quote_deposits
+  using:
+    foreign_key_constraint_on:
+      column: quote_id
+      table:
+        name: quote_deposits
+        schema: public
 - name: quote_items
   using:
     foreign_key_constraint_on:

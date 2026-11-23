@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { LayoutDashboard, ShoppingCart, Wallet, Users, Eye, FileText, FlaskConical, Boxes, RotateCcw, Building2, BarChart3, Settings, Bell, LogOut, Menu, X, ChevronDown, RefreshCw, CalendarDays, Wifi, WifiOff } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Wallet, Users, Eye, FileText, FlaskConical, Inbox, Boxes, RotateCcw, Building2, BarChart3, Settings, Bell, LogOut, Menu, X, ChevronDown, RefreshCw, CalendarDays, Wifi, WifiOff } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { useAuth } from '../lib/auth'
 import { gql, isDevMode } from '../lib/nhost'
@@ -19,6 +19,7 @@ const NAV = [
   { to: '/examenes', label: 'Exámenes · RX', icon: Eye },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { to: '/ordenes', label: 'Órdenes lab.', icon: FlaskConical },
+  { to: '/cajon', label: 'Cajón', icon: Inbox },
   { to: '/stock', label: 'Stock', icon: Boxes },
   { to: '/rma', label: 'RMA · Reclamos', icon: RotateCcw },
   { to: '/intercompany', label: 'Intercompany', icon: Building2 },

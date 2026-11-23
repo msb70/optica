@@ -12,9 +12,10 @@ import type { LabOrder } from '../lib/types'
 const FLOW = ['pendiente', 'enviado', 'en_proceso', 'recibido', 'listo', 'entregado']
 const Q = `query LabOrders($branch: uuid!, $closed: Boolean!) { lab_orders(where:{branch_id:{_eq:$branch}, status:{_nin: ["entregado","cancelado"]}}, order_by:{promised_at:asc}) @skip(if:$closed) { ...F }
   closed: lab_orders(where:{branch_id:{_eq:$branch}, status:{_in:["entregado","cancelado"]}}, order_by:{delivered_at:desc}, limit:60) @include(if:$closed) { ...F } }
-  fragment F on lab_orders { id number status lab_name lens_type treatment frame promised_at sent_at received_at delivered_at notified_at notes created_at customer_id customer { first_name last_name phone } sale { number total } exam { rx_final } lab_order_events(order_by:{created_at:desc}) { id status note created_at } }`
+  fragment F on lab_orders { id number status lab_name lens_type treatment frame promised_at sent_at received_at delivered_at notified_at notes created_at customer_id quote_id quote { id number status } customer { first_name last_name phone } sale { number total } exam { rx_final } lab_order_events(order_by:{created_at:desc}) { id status note created_at } }`
 const ADVANCE = `mutation Advance($id: uuid!, $set: lab_orders_set_input!, $ev: lab_order_events_insert_input!) { update_lab_orders_by_pk(pk_columns:{id:$id}, _set:$set) { id } insert_lab_order_events_one(object:$ev) { id } }`
 const DELIVER_SALE = `mutation DeliverSale($number: String!) { update_sales(where:{number:{_eq:$number}}, _set:{delivery_status:"entregado", delivered_at:"now()"}) { affected_rows } }`
+const QUOTE_READY = `mutation QReady($id: uuid!) { update_quotes_by_pk(pk_columns:{id:$id}, _set:{status:"lista", ready_at:"now()"}) { id } }`
 const NOTIFY = `mutation Notify($id: uuid!) { update_lab_orders_by_pk(pk_columns:{id:$id}, _set:{notified_at:"now()"}) { id } }`
 
 export default function Ordenes() {
@@ -29,12 +30,14 @@ export default function Ordenes() {
 
   const advance = async (o: LabOrder) => {
     const i = FLOW.indexOf(o.status); const nextS = FLOW[Math.min(FLOW.length - 1, i + 1)]
+    if (nextS === 'entregado' && o.quote_id) { setToast(`${o.number} pertenece a la orden de trabajo ${o.quote?.number}: entrégala desde Cajón para emitir la factura`); return }
     const set: Record<string, unknown> = { status: nextS }
     if (nextS === 'enviado') set.sent_at = new Date().toISOString()
     if (nextS === 'recibido') set.received_at = new Date().toISOString()
     if (nextS === 'entregado') set.delivered_at = new Date().toISOString()
     await gql(ADVANCE, { id: o.id, set, ev: { lab_order_id: o.id, status: nextS, staff_id: me?.id ?? null, note: `Cambio de estado a ${STATUS_LABEL[nextS]}` } })
     if (nextS === 'entregado' && o.sale?.number) await gql(DELIVER_SALE, { number: o.sale.number })
+    if (nextS === 'listo' && o.quote_id && o.quote && ['aprobada', 'abonada'].includes(o.quote.status)) await gql(QUOTE_READY, { id: o.quote_id })
     setToast(`${o.number} → ${STATUS_LABEL[nextS]}`); setSel(null); void q.refetch(); void qc.invalidateQueries({ queryKey: ['dash'] })
   }
   const notify = async (o: LabOrder) => { await gql(NOTIFY, { id: o.id }); setToast(`Notificación de entrega enviada a ${o.customer?.phone} (WhatsApp/SMS simulado)`); void q.refetch() }

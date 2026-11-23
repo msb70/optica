@@ -14,6 +14,7 @@ import Agenda from './pages/Agenda'
 import Examenes, { ExamenNuevo } from './pages/Examenes'
 import Cotizaciones from './pages/Cotizaciones'
 import Ordenes from './pages/Ordenes'
+import Cajon from './pages/Cajon'
 import Stock from './pages/Stock'
 import RMA from './pages/RMA'
 import Intercompany from './pages/Intercompany'
@@ -62,6 +63,7 @@ function Shell() {
         <Route path="examenes/nuevo" element={<ExamenNuevo />} />
         <Route path="cotizaciones" element={<Cotizaciones />} />
         <Route path="ordenes" element={<Ordenes />} />
+        <Route path="cajon" element={<Cajon />} />
         <Route path="stock" element={<Stock />} />
         <Route path="rma" element={<RMA />} />
         <Route path="intercompany" element={<Intercompany />} />

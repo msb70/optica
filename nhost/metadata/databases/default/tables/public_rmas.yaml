@@ -2,6 +2,12 @@ table:
   name: rmas
   schema: public
 object_relationships:
+- name: lab_order
+  using:
+    foreign_key_constraint_on: lab_order_id
+- name: replacement_product
+  using:
+    foreign_key_constraint_on: replacement_product_id
 - name: branch
   using:
     foreign_key_constraint_on: branch_id
