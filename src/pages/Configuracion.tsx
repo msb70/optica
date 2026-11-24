@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, Store, Users, Plus, Shield, Link2, Pencil, Trash2, Truck, ListChecks } from 'lucide-react'
+import { Building2, Store, Users, Plus, Shield, Link2, Pencil, Trash2, Truck, ListChecks, Mail } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { MODULES, ACCESS_LABEL, type Access } from '../lib/permissions'
-import { gql } from '../lib/nhost'
+import { gql, nhost, NHOST_SUBDOMAIN, NHOST_REGION } from '../lib/nhost'
 import { Card, PageHeader, Modal, Field, Tabs, Badge, Toast, Avatar } from '../components/ui'
-import { money, ROLES } from '../lib/format'
+import { money, ROLES, fdate } from '../lib/format'
 import type { Company, Branch, Staff } from '../lib/types'
 
 const AUDIT = `query Audit { audit_log(order_by:{created_at:desc}, limit: 40) { id entity entity_id action actor created_at company { code } } }`
@@ -35,6 +35,17 @@ export default function Configuracion() {
   const [supEdit, setSupEdit] = useState<{ id?: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean } | null>(null)
   const [stBranches, setStBranches] = useState<string[]>([])
   const [stAll, setStAll] = useState(false)
+  const [inviting, setInviting] = useState<string | null>(null)
+  const invite = async (x: Staff) => {
+    setInviting(x.id)
+    try {
+      const tok = nhost.getUserSession()?.accessToken
+      const r = await fetch(`https://${NHOST_SUBDOMAIN}.functions.${NHOST_REGION}.nhost.run/v1/invite`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` }, body: JSON.stringify({ staffId: x.id, redirectTo: `${window.location.origin}/?accion=crear-clave` }) })
+      const b = await r.json().catch(() => ({})) as { error?: string; email?: string }
+      setToast(r.ok ? `Invitación enviada a ${b.email}` : (b.error ?? `No se pudo invitar (${r.status})`))
+      void qc.invalidateQueries({ queryKey: ['org'] })
+    } catch { setToast('No se pudo contactar con el servicio de invitaciones') } finally { setInviting(null) }
+  }
   const [stPerms, setStPerms] = useState<Record<string, Access> | null>(null)
   const roleAccess = (role: string, module: string): Access => role === 'admin' ? 'editar' : (rolePermissions.find((p) => p.role === role && p.module === module)?.access ?? 'ninguno')
   const [toast, setToast] = useState<string | null>(null)
@@ -77,7 +88,7 @@ export default function Configuracion() {
 
       {tab === 'personal' && <Card padded={false} title="Personal y permisos" actions={<button className="btn-primary h-8 text-xs" onClick={() => openSt({ company_id: companies[0]?.id, branch_id: branches[0]?.id, name: '', email: '', role: 'vendedor', commission_pct: 3, max_discount_pct: 10, monthly_goal: 0, active: true })}><Plus size={13} />Nuevo usuario</button>}>
         <table className="table"><thead><tr><th>Nombre</th><th>Rol</th><th>Compañía</th><th>Sucursal</th><th className="text-right">Comisión</th><th className="text-right">Desc. máx.</th><th className="text-right">Meta</th><th>Acceso</th><th /></tr></thead><tbody>
-          {staff.map((s) => <tr key={s.id}><td><span className="flex items-center gap-2"><Avatar name={s.name} className="h-7 w-7 text-[10px]" /><div><b>{s.name}</b><div className="text-[11px] text-slate-400">{s.email}</div></div></span></td><td><Badge tone={s.role === 'admin' ? 'dark' : s.role === 'gerente' ? 'violet' : s.role === 'optometrista' ? 'blue' : 'slate'}>{ROLES[s.role]}</Badge></td><td className="text-xs">{companies.find((c) => c.id === s.company_id)?.code}</td><td className="text-xs">{(s.role === 'admin' || s.all_branches) ? <Badge tone="blue">Todas</Badge> : (s.staff_branches?.length ? s.staff_branches.map((x) => branches.find((b) => b.id === x.branch_id)?.name).filter(Boolean).join(', ') : branches.find((b) => b.id === s.branch_id)?.name ?? <span className="text-rose-500">ninguna</span>)}{s.permissions && <Badge tone="violet">permisos personalizados</Badge>}</td><td className="text-right">{s.commission_pct}%</td><td className="text-right">{s.max_discount_pct}%</td><td className="text-right">{Number(s.monthly_goal) ? money(s.monthly_goal) : '—'}</td><td>{s.user_id ? <Badge tone="green">vinculado</Badge> : <Badge tone="amber">sin login</Badge>}</td><td><button className="btn-ghost h-7 text-xs" onClick={() => openSt(s)}><Pencil size={12} /></button></td></tr>)}
+          {staff.map((s) => <tr key={s.id}><td><span className="flex items-center gap-2"><Avatar name={s.name} className="h-7 w-7 text-[10px]" /><div><b>{s.name}</b><div className="text-[11px] text-slate-400">{s.email}</div></div></span></td><td><Badge tone={s.role === 'admin' ? 'dark' : s.role === 'gerente' ? 'violet' : s.role === 'optometrista' ? 'blue' : 'slate'}>{ROLES[s.role]}</Badge></td><td className="text-xs">{companies.find((c) => c.id === s.company_id)?.code}</td><td className="text-xs">{(s.role === 'admin' || s.all_branches) ? <Badge tone="blue">Todas</Badge> : (s.staff_branches?.length ? s.staff_branches.map((x) => branches.find((b) => b.id === x.branch_id)?.name).filter(Boolean).join(', ') : branches.find((b) => b.id === s.branch_id)?.name ?? <span className="text-rose-500">ninguna</span>)}{s.permissions && <Badge tone="violet">permisos personalizados</Badge>}</td><td className="text-right">{s.commission_pct}%</td><td className="text-right">{s.max_discount_pct}%</td><td className="text-right">{Number(s.monthly_goal) ? money(s.monthly_goal) : '—'}</td><td>{s.user_id ? <Badge tone="green">con cuenta</Badge> : <Badge tone="amber">sin acceso</Badge>}{s.invited_at && <div className="text-[10px] text-slate-400 mt-0.5">invitado {fdate(s.invited_at)}</div>}</td><td><div className="flex gap-1 justify-end">{s.email && <button className="btn-secondary h-7 text-xs" disabled={inviting === s.id} onClick={() => invite(s)} title={`Enviar correo de invitación a ${s.email}`}><Mail size={12} />{s.user_id || s.invited_at ? 'Reenviar' : 'Invitar'}</button>}<button className="btn-ghost h-7 text-xs" onClick={() => openSt(s)}><Pencil size={12} /></button></div></td></tr>)}
         </tbody></table>
       </Card>}
 

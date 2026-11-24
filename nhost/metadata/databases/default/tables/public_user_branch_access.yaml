@@ -1,0 +1,19 @@
+table:
+  name: user_branch_access
+  schema: public
+object_relationships:
+- name: branch
+  using:
+    manual_configuration:
+      remote_table:
+        schema: public
+        name: branches
+      column_mapping:
+        branch_id: id
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter:
+      user_id:
+        _eq: X-Hasura-User-Id

@@ -1,23 +1,65 @@
 table:
   name: role_permissions
   schema: public
-insert_permissions:
-- role: user
-  permission:
-    check: {}
-    columns: '*'
 select_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
+    filter:
+      _exists:
+        _table:
+          schema: public
+          name: user_module_access
+        _where:
+          user_id:
+            _eq: X-Hasura-User-Id
+insert_permissions:
+- role: user
+  permission:
+    check:
+      _exists:
+        _table:
+          schema: public
+          name: user_module_access
+        _where:
+          _and:
+          - user_id:
+              _eq: X-Hasura-User-Id
+          - module:
+              _in:
+              - configuracion
+          - access:
+              _eq: editar
+    columns: '*'
 update_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
-    check: {}
-delete_permissions:
-- role: user
-  permission:
-    filter: {}
+    filter:
+      _exists:
+        _table:
+          schema: public
+          name: user_module_access
+        _where:
+          _and:
+          - user_id:
+              _eq: X-Hasura-User-Id
+          - module:
+              _in:
+              - configuracion
+          - access:
+              _eq: editar
+    check:
+      _exists:
+        _table:
+          schema: public
+          name: user_module_access
+        _where:
+          _and:
+          - user_id:
+              _eq: X-Hasura-User-Id
+          - module:
+              _in:
+              - configuracion
+          - access:
+              _eq: editar

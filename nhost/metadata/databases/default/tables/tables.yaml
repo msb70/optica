@@ -55,3 +55,6 @@
 - "!include public_staff_branches.yaml"
 - "!include public_quote_deposits.yaml"
 - "!include public_role_permissions.yaml"
+- "!include public_user_branch_access.yaml"
+- "!include public_user_company_access.yaml"
+- "!include public_user_module_access.yaml"

@@ -14,5 +14,12 @@ select_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
+    filter:
+      _exists:
+        _table:
+          schema: public
+          name: user_module_access
+        _where:
+          user_id:
+            _eq: X-Hasura-User-Id
     allow_aggregations: true

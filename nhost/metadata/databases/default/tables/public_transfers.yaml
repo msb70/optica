@@ -19,24 +19,101 @@ array_relationships:
       table:
         name: transfer_items
         schema: public
-insert_permissions:
-- role: user
-  permission:
-    check: {}
-    columns: '*'
 select_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
+    filter:
+      _or:
+      - from_branch:
+          user_access:
+            user_id:
+              _eq: X-Hasura-User-Id
+      - to_branch:
+          user_access:
+            user_id:
+              _eq: X-Hasura-User-Id
     allow_aggregations: true
+insert_permissions:
+- role: user
+  permission:
+    check:
+      _and:
+      - _or:
+        - from_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+        - to_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - stock
+                - intercompany
+            - access:
+                _eq: editar
+    columns: '*'
 update_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
-    check: {}
-delete_permissions:
-- role: user
-  permission:
-    filter: {}
+    filter:
+      _and:
+      - _or:
+        - from_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+        - to_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - stock
+                - intercompany
+            - access:
+                _eq: editar
+    check:
+      _and:
+      - _or:
+        - from_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+        - to_branch:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - stock
+                - intercompany
+            - access:
+                _eq: editar

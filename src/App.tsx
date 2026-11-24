@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -21,20 +22,32 @@ import Intercompany from './pages/Intercompany'
 import Reportes from './pages/Reportes'
 import Zoho from './pages/Zoho'
 import Configuracion from './pages/Configuracion'
+import CrearClave from './pages/CrearClave'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000, refetchOnWindowFocus: false } } })
 
 function Gate() {
   const { isAuthenticated, isLoading } = useAuth()
+  const [settingPassword, setSettingPassword] = useState(() => window.location.pathname === '/crear-clave' || new URLSearchParams(window.location.search).get('accion') === 'crear-clave')
+  if (settingPassword) return <CrearClave onDone={() => setSettingPassword(false)} />
   if (isLoading) return <Loading label="Conectando con Nhost…" />
   if (!isAuthenticated) return <Login />
   return <AppProvider><Shell /></AppProvider>
 }
 
 function Shell() {
-  const { loading, company, companies, organizationError, retryOrganization } = useApp()
+  const { loading, company, companies, organizationError, retryOrganization, me } = useApp()
   const { signOut } = useAuth()
   const queryClient = useQueryClient()
+  if (!loading && !me) return (
+    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <section className="card max-w-lg p-6" role="alert">
+        <h1 className="text-xl font-bold text-slate-900">Tu cuenta no está dada de alta</h1>
+        <p className="mt-3 text-sm text-slate-600">Has iniciado sesión, pero tu email no está vinculado a ninguna ficha de Personal. Pide al administrador que te invite desde Configuración → Personal.</p>
+        <button className="btn-secondary mt-5" onClick={async () => { await signOut(); queryClient.clear() }}>Cerrar sesión</button>
+      </section>
+    </main>
+  )
   if (organizationError || (!loading && !companies.length)) return (
     <main className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
       <section className="card max-w-lg p-6" role="alert">

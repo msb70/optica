@@ -8,24 +8,130 @@ object_relationships:
 - name: product
   using:
     foreign_key_constraint_on: product_id
-insert_permissions:
-- role: user
-  permission:
-    check: {}
-    columns: '*'
 select_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
+    filter:
+      doc:
+        _or:
+        - issuer_company:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
+        - receiver_company:
+            user_access:
+              user_id:
+                _eq: X-Hasura-User-Id
     allow_aggregations: true
+insert_permissions:
+- role: user
+  permission:
+    check:
+      _and:
+      - doc:
+          _or:
+          - issuer_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          - receiver_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - intercompany
+            - access:
+                _eq: editar
+    columns: '*'
 update_permissions:
 - role: user
   permission:
     columns: '*'
-    filter: {}
-    check: {}
+    filter:
+      _and:
+      - doc:
+          _or:
+          - issuer_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          - receiver_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - intercompany
+            - access:
+                _eq: editar
+    check:
+      _and:
+      - doc:
+          _or:
+          - issuer_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          - receiver_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - intercompany
+            - access:
+                _eq: editar
 delete_permissions:
 - role: user
   permission:
-    filter: {}
+    filter:
+      _and:
+      - doc:
+          _or:
+          - issuer_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+          - receiver_company:
+              user_access:
+                user_id:
+                  _eq: X-Hasura-User-Id
+      - _exists:
+          _table:
+            schema: public
+            name: user_module_access
+          _where:
+            _and:
+            - user_id:
+                _eq: X-Hasura-User-Id
+            - module:
+                _in:
+                - intercompany
+            - access:
+                _eq: editar

@@ -28,7 +28,7 @@ const Ctx = createContext<AppCtx | null>(null)
 
 const ORG_QUERY = `query Org { companies(order_by:{code:asc}) { id code legal_name trade_name tax_id country currency tax_rate invoice_prefix zoho_org_id active allow_negative_stock min_deposit_pct warranty_frame_months warranty_lens_months }
   branches(order_by:{name:asc}) { id company_id code name address phone monthly_goal active zoho_scope zoho_org_id zoho_tag }
-  staff(where:{active:{_eq:true}}, order_by:{name:asc}) { id user_id company_id branch_id name email role commission_pct max_discount_pct monthly_goal active all_branches permissions staff_branches { branch_id } }
+  staff(where:{active:{_eq:true}}, order_by:{name:asc}) { id user_id company_id branch_id name email role commission_pct max_discount_pct monthly_goal active all_branches permissions invited_at staff_branches { branch_id } }
   role_permissions { role module access } }`
 
 const CASH_QUERY = `query OpenCash($branch: uuid!) { cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"abierta"}}, order_by:{opened_at:desc}, limit:1) {
@@ -75,7 +75,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const me = useMemo(() => {
     if (!user) return null
     const byUser = staff.find((s) => s.user_id === user.id) || staff.find((s) => s.email && s.email.toLowerCase() === (user.email || '').toLowerCase())
-    return byUser ?? staff.find((s) => s.role === 'admin') ?? null
+    return byUser ?? null
   }, [staff, user])
 
   const rolePermissions = org.data?.role_permissions ?? []

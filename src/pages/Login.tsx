@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/auth'
+import { nhost } from '../lib/nhost'
 import { Spinner } from '../components/ui'
 
 export default function Login() {
@@ -10,6 +11,13 @@ export default function Login() {
   const [name, setName] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [info, setInfo] = useState<string | null>(null)
+  const forgot = async () => {
+    setErr(null); setInfo(null)
+    if (!email) { setErr('Escribe tu email y vuelve a pulsar'); return }
+    try { await nhost.auth.sendPasswordResetEmail({ email, options: { redirectTo: `${window.location.origin}/?accion=crear-clave` } }); setInfo('Si el email está dado de alta, recibirás un correo para crear una nueva contraseña.') }
+    catch { setInfo('Si el email está dado de alta, recibirás un correo para crear una nueva contraseña.') }
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setErr(null)
@@ -42,7 +50,9 @@ export default function Login() {
           <label className="block mb-4"><span className="label">Contraseña</span><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} /></label>
           {err && <div className="mb-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm px-3 py-2">{err}</div>}
           <button className="btn-primary w-full h-11" disabled={busy}>{busy ? <Spinner className="text-white" /> : mode === 'in' ? 'Entrar' : 'Crear cuenta'}</button>
-          <p className="mt-3 text-center text-xs text-slate-400">Las cuentas las crea el administrador de la óptica.</p>
+          <button type="button" className="btn-ghost w-full mt-2 text-xs" onClick={forgot}>¿Olvidaste tu contraseña?</button>
+          {info && <div className="mt-2 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs px-3 py-2">{info}</div>}
+          <p className="mt-3 text-center text-xs text-slate-400">Las cuentas las crea el administrador de la óptica mediante invitación por correo.</p>
         </form>
       </div>
     </div>

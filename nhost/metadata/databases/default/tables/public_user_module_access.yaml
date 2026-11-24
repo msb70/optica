@@ -1,0 +1,10 @@
+table:
+  name: user_module_access
+  schema: public
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter:
+      user_id:
+        _eq: X-Hasura-User-Id

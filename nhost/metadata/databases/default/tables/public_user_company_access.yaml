@@ -1,0 +1,19 @@
+table:
+  name: user_company_access
+  schema: public
+object_relationships:
+- name: company
+  using:
+    manual_configuration:
+      remote_table:
+        schema: public
+        name: companies
+      column_mapping:
+        company_id: id
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter:
+      user_id:
+        _eq: X-Hasura-User-Id
