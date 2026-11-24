@@ -116,7 +116,7 @@ function NuevaCotizacion({ customerId, examId, onClose, onCreated, currency }: {
   const [notes, setNotes] = useState('')
   const [validDays, setValidDays] = useState(15)
   const products = useQuery({ queryKey: ['q-products'], queryFn: () => gql<{ products: Product[] }>(PRODUCTS) })
-  const custs = useQuery({ queryKey: ['q-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(`query($company: uuid!, $q: String!) { customers(where:{company_id:{_eq:$company}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}}]}, limit:8) { id code first_name last_name phone } }`, { company: company!.id, q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
+  const custs = useQuery({ queryKey: ['q-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(`query($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}}]}, limit:8) { id code first_name last_name phone } }`, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
   useEffect(() => { if (!customerId) return; gql<{ customers_by_pk: Customer; exams: typeof exam[] }>(CUST, { id: customerId, examFilter: examId ? { id: { _eq: examId } } : { customer_id: { _eq: customerId } } }).then((r) => { setCustomer(r.customers_by_pk); setExam(r.exams[0] ?? null) }) }, [customerId, examId])
   const filtered = useMemo(() => { const s = search.toLowerCase(); return (products.data?.products ?? []).filter((p) => s && (p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s))).slice(0, 8) }, [products.data, search])
   const subtotal = lines.reduce((a, l) => a + Number(l.product.price) * l.qty * (1 - l.discount_pct / 100), 0)

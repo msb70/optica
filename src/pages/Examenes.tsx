@@ -50,7 +50,7 @@ export default function Examenes() {
 }
 
 // ---------------------------------------------------------------------
-const CUST_Q = `query ExamCust($company: uuid!, $q: String!) { customers(where:{company_id:{_eq:$company}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}}]}, limit: 8) { id code first_name last_name phone birth_date tags } }`
+const CUST_Q = `query ExamCust($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}}]}, limit: 8) { id code first_name last_name phone birth_date tags } }`
 const CUST_ONE = `query ExamCustOne($id: uuid!) { customers_by_pk(id:$id) { id code first_name last_name phone birth_date tags } exams(where:{customer_id:{_eq:$id}}, order_by:{exam_date:desc}, limit:1) { rx_final autorefraction } }`
 const INSERT = `mutation NewExam($o: exams_insert_input!, $appt: appointments_bool_exp!) { insert_exams_one(object:$o) { id rx_final_transposed next_review_date } update_appointments(where:$appt, _set:{status:"atendida"}) { affected_rows } }`
 
@@ -109,7 +109,7 @@ export function ExamenNuevo() {
   const [prev, setPrev] = useState<Rx | null>(null)
   const [saved, setSaved] = useState<{ id: string; rx_final_transposed: Rx } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const custs = useQuery({ queryKey: ['exam-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUST_Q, { company: company!.id, q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
+  const custs = useQuery({ queryKey: ['exam-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUST_Q, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
 
   useEffect(() => {
     const id = params.get('customer'); if (!id) return

@@ -10,13 +10,13 @@ import { money, fdate, SOURCES, fullName } from '../lib/format'
 import { NewCustomerModal } from './POS'
 import type { Customer } from '../lib/types'
 
-const Q = `query Customers($company: uuid!, $q: String!, $source: [String!]) {
-  customers(where:{company_id:{_eq:$company}, source:{_in:$source}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{email:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, order_by:{created_at:desc}, limit: 100) {
+const Q = `query Customers($q: String!, $source: [String!]) {
+  customers(where:{source:{_in:$source}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{email:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, order_by:{created_at:desc}, limit: 100) {
     id code first_name last_name email phone tax_id birth_date gender source balance tags created_at branch { name }
     sales_aggregate(where:{status:{_in:["completada","parcial"]}}) { aggregate { count sum { total } max { sale_date } } }
     exams(order_by:{exam_date:desc}, limit:1) { exam_date next_review_date }
   }
-  customers_aggregate(where:{company_id:{_eq:$company}}) { aggregate { count } }
+  customers_aggregate { aggregate { count } }
 }`
 type Row = Customer & { branch?: { name: string }; sales_aggregate: { aggregate: { count: number; sum: { total: number | null }; max: { sale_date: string | null } } }; exams: { exam_date: string; next_review_date?: string | null }[] }
 
@@ -25,11 +25,11 @@ export default function Clientes() {
   const [search, setSearch] = useState('')
   const [source, setSource] = useState('')
   const [open, setOpen] = useState(false)
-  const q = useQuery({ queryKey: ['customers', company?.id, search, source], queryFn: () => gql<{ customers: Row[]; customers_aggregate: { aggregate: { count: number } } }>(Q, { company: company!.id, q: `%${search}%`, source: source ? [source] : Object.keys(SOURCES) }), enabled: !!company })
+  const q = useQuery({ queryKey: ['customers', company?.id, search, source], queryFn: () => gql<{ customers: Row[]; customers_aggregate: { aggregate: { count: number } } }>(Q, { q: `%${search}%`, source: source ? [source] : Object.keys(SOURCES) }), enabled: !!company })
   const today = new Date().toISOString().slice(0, 10)
   return (
     <div className="space-y-4">
-      <PageHeader title="Clientes / Pacientes" subtitle={`${q.data?.customers_aggregate.aggregate.count ?? '…'} clientes en ${company?.trade_name}`} actions={<button className="btn-primary" onClick={() => setOpen(true)}><UserPlus size={15} />Nuevo cliente</button>} />
+      <PageHeader title="Clientes / Pacientes" subtitle={`${q.data?.customers_aggregate.aggregate.count ?? '…'} clientes del grupo (compartidos entre todas las ópticas)`} actions={<button className="btn-primary" onClick={() => setOpen(true)}><UserPlus size={15} />Nuevo cliente</button>} />
       <div className="flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[240px]"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input className="input pl-9 h-10" placeholder="Buscar por nombre, teléfono, cédula, código o email…" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus /></div>
         <select className="input h-10 w-44" value={source} onChange={(e) => setSource(e.target.value)}><option value="">Todos los orígenes</option>{Object.entries(SOURCES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>

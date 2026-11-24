@@ -1,0 +1,23 @@
+table:
+  name: role_permissions
+  schema: public
+insert_permissions:
+- role: user
+  permission:
+    check: {}
+    columns: '*'
+select_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+update_permissions:
+- role: user
+  permission:
+    columns: '*'
+    filter: {}
+    check: {}
+delete_permissions:
+- role: user
+  permission:
+    filter: {}

@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { LayoutDashboard, ShoppingCart, Wallet, Users, Eye, FileText, FlaskConical, Inbox, Boxes, RotateCcw, Building2, BarChart3, Settings, Bell, LogOut, Menu, X, ChevronDown, RefreshCw, CalendarDays, Wifi, WifiOff } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { useAuth } from '../lib/auth'
-import { gql, isDevMode } from '../lib/nhost'
+import { gql, isDevMode, setWriteGuard } from '../lib/nhost'
+import { moduleOfPath } from '../lib/permissions'
 import type { Alert } from '../lib/types'
 import { Avatar, Badge, Toast } from './ui'
 import { ROLES, ago } from '../lib/format'
 
+const NAV_MOD: Record<string, string> = { '/': 'dashboard', '/pos': 'pos', '/caja': 'caja', '/clientes': 'clientes', '/agenda': 'agenda', '/examenes': 'examenes', '/cotizaciones': 'cotizaciones', '/ordenes': 'ordenes', '/cajon': 'cajon', '/stock': 'stock', '/rma': 'rma', '/intercompany': 'intercompany', '/reportes': 'reportes', '/zoho': 'zoho', '/configuracion': 'configuracion' }
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/pos', label: 'POS · Venta', icon: ShoppingCart },
@@ -31,7 +33,11 @@ const NAV = [
 const ALERTS_Q = `query Alerts($company: uuid!) { v_alerts(where:{company_id:{_eq:$company}}, order_by:{at:desc}, limit: 60) { kind company_id branch_id ref_id message at severity branch { name } } }`
 
 export default function Layout() {
-  const { companies, branches, company, branch, setCompanyId, setBranchId, me, cashSession } = useApp()
+  const { companies, branches, company, branch, setCompanyId, setBranchId, me, cashSession, access } = useApp()
+  const loc = useLocation()
+  const mod = moduleOfPath(loc.pathname)
+  const modAccess = access(mod)
+  useEffect(() => { setWriteGuard(() => (access(moduleOfPath(window.location.pathname)) === 'editar' ? null : 'Tu usuario solo tiene permiso de lectura en este módulo')); return () => setWriteGuard(null) }, [access])
   const { user, signOut } = useAuth()
   const nav = useNavigate()
   const [open, setOpen] = useState(false)
@@ -53,7 +59,7 @@ export default function Layout() {
         <button className="ml-auto lg:hidden text-slate-400" onClick={() => setOpen(false)}><X size={18} /></button>
       </div>
       <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
-        {NAV.map((n) => (
+        {NAV.filter((n) => access(NAV_MOD[n.to] ?? '') !== 'ninguno').map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setOpen(false)} className={({ isActive }) => clsx('flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition', isActive ? 'bg-white/10 text-white shadow-inner' : 'hover:bg-white/5 hover:text-white')}>
             <n.icon size={17} className="shrink-0 opacity-80" />{n.label}
           </NavLink>
@@ -128,7 +134,7 @@ export default function Layout() {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-6" onClick={() => bell && setBell(false)}>
-          <Outlet />
+          {modAccess === 'ninguno' ? <NoAccess /> : <>{modAccess === 'ver' && <div className="mb-3 rounded-xl bg-slate-100 text-slate-600 text-xs px-3 py-2 no-print">Tienes acceso de <b>solo lectura</b> a este módulo: puedes consultar pero no guardar cambios.</div>}<Outlet /></>}
         </main>
         <Toast msg={err} tone="rose" onClose={() => setErr(null)} />
       </div>
@@ -141,4 +147,8 @@ export function alertKind(k: string) {
 }
 export function alertRoute(a: Alert) {
   return ({ caja_descuadrada: '/caja', stock_critico: '/stock', cotizacion_sin_seguimiento: '/cotizaciones', rx_vencida: `/clientes/${a.ref_id}` } as Record<string, string>)[a.kind] ?? '/'
+}
+
+function NoAccess() {
+  return <div className="card p-10 text-center"><div className="text-lg font-bold text-slate-800">Sin acceso a este módulo</div><div className="text-sm text-slate-500 mt-1">Pide al administrador que te dé permiso en Configuración → Personal o Roles y permisos.</div></div>
 }

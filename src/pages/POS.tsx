@@ -10,7 +10,7 @@ import { money, CATEGORIES, METHODS, SOURCES, fullName, normPhone } from '../lib
 import type { Product, Customer, Quote } from '../lib/types'
 
 const PRODUCTS_Q = `query PosProducts($branch: uuid!) { products(where:{active:{_eq:true}}, order_by:[{name:asc}]) { id sku barcode name category brand model color cost price min_stock track_stock active stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
-const CUSTOMERS_Q = `query PosCustomers($company: uuid!, $q: String!) { customers(where:{company_id:{_eq:$company}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, limit: 8, order_by:{last_name:asc}) { id code first_name last_name phone email balance source tax_id } }`
+const CUSTOMERS_Q = `query PosCustomers($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, limit: 8, order_by:{last_name:asc}) { id code first_name last_name phone email balance source tax_id } }`
 const QUOTE_Q = `query PosQuote($id: uuid!) { quotes_by_pk(id:$id) { id number customer_id discount status customer { id code first_name last_name phone email balance source tax_id } quote_items { product_id qty unit_price discount_pct description } } }`
 const VOUCHER_Q = `query Voucher($code: String!, $company: uuid!) { vouchers(where:{code:{_eq:$code}, company_id:{_eq:$company}, status:{_eq:"activo"}}) { id code kind amount balance discount_pct } }`
 const CREATE_SALE = `mutation CreateSale($co: uuid!, $br: uuid!, $cu: uuid!, $se: uuid, $items: jsonb!, $pay: jsonb!, $disc: numeric, $quote: uuid, $cash: uuid, $notes: String) {
@@ -48,7 +48,7 @@ export default function POS() {
   useEffect(() => { if (!sellerId) setSellerId(me && me.role !== 'cajero' ? me.id : sellers[0]?.id ?? '') }, [me, sellers, sellerId])
 
   const products = useQuery({ queryKey: ['pos-products', branch?.id], queryFn: () => gql<{ products: PosProduct[] }>(PRODUCTS_Q, { branch: branch!.id }), enabled: !!branch, staleTime: 30_000 })
-  const custs = useQuery({ queryKey: ['pos-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUSTOMERS_Q, { company: company!.id, q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
+  const custs = useQuery({ queryKey: ['pos-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUSTOMERS_Q, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
 
   // Cliente preseleccionado desde su ficha
   useEffect(() => {
@@ -300,7 +300,7 @@ export function NewCustomerModal({ open, onClose, initial = '', companyId, branc
   const phoneOk = normPhone(f.phone).length >= 7
   const checkDupe = async (phone: string) => {
     const n = normPhone(phone); if (n.length < 7) { setDupe(null); return null }
-    const r = await gql<{ customers: Customer[] }>(`query Dupe($c: uuid!, $p: String!) { customers(where:{company_id:{_eq:$c}, phone_norm:{_eq:$p}}, limit:1) { id code first_name last_name phone email balance source tax_id } }`, { c: companyId, p: n })
+    const r = await gql<{ customers: Customer[] }>(`query Dupe($p: String!) { customers(where:{phone_norm:{_eq:$p}}, limit:1) { id code first_name last_name phone email balance source tax_id } }`, { p: n })
     setDupe(r.customers[0] ?? null); return r.customers[0] ?? null
   }
   const save = async () => {

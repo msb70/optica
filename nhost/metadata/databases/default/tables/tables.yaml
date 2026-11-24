@@ -54,3 +54,4 @@
 - "!include public_suppliers.yaml"
 - "!include public_staff_branches.yaml"
 - "!include public_quote_deposits.yaml"
+- "!include public_role_permissions.yaml"

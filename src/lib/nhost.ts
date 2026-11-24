@@ -18,8 +18,13 @@ export class GraphQLError extends Error {
   }
 }
 
+/** Guardia de escritura: devuelve un mensaje si el usuario solo puede ver el módulo actual. */
+let writeGuard: (() => string | null) | null = null
+export const setWriteGuard = (fn: (() => string | null) | null) => { writeGuard = fn }
+
 /** Ejecuta una operación GraphQL contra Hasura (Nhost) y devuelve `data`. */
 export async function gql<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  if (/^\s*mutation\b/.test(query)) { const msg = writeGuard?.(); if (msg) { window.dispatchEvent(new CustomEvent('gql-error', { detail: msg })); throw new Error(msg) } }
   if (isDevMode) {
     const res = await fetch(DEV_GRAPHQL_URL!, {
       method: 'POST',

@@ -51,7 +51,7 @@ export default function ClienteDetalle() {
   const age = c.birth_date ? Math.floor((Date.now() - new Date(c.birth_date).getTime()) / 31557600000) : null
 
   const addNote = async () => { if (!note.trim()) return; await gql(NOTE, { o: { customer_id: c.id, staff_id: me?.id ?? null, kind: noteKind, body: note.trim() } }); setNote(''); void q.refetch() }
-  const addAppt = async () => { await gql(APPT, { o: { company_id: c.company_id, branch_id: branch?.id ?? c.branch_id, customer_id: c.id, optometrist_id: appt.optometrist_id || null, scheduled_at: `${appt.date}T${appt.time}:00`, source: c.source } }); setApptOpen(false); void q.refetch() }
+  const addAppt = async () => { await gql(APPT, { o: { company_id: branch?.company_id ?? c.company_id, branch_id: branch?.id ?? c.branch_id, customer_id: c.id, optometrist_id: appt.optometrist_id || null, scheduled_at: `${appt.date}T${appt.time}:00`, source: c.source } }); setApptOpen(false); void q.refetch() }
 
   return (
     <div className="space-y-4">

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, Store, Users, Plus, Shield, Link2, Pencil, Trash2, Truck, ListChecks } from 'lucide-react'
 import { useApp } from '../lib/app'
+import { MODULES, ACCESS_LABEL, type Access } from '../lib/permissions'
 import { gql } from '../lib/nhost'
 import { Card, PageHeader, Modal, Field, Tabs, Badge, Toast, Avatar } from '../components/ui'
 import { money, ROLES } from '../lib/format'
@@ -21,17 +22,21 @@ const UP_REASON = `mutation UpR($id: uuid!, $set: consult_reasons_set_input!) { 
 const DEL_REASON = `mutation DelR($id: uuid!) { delete_consult_reasons_by_pk(id:$id) { id } }`
 const UP_SUPPLIER = `mutation UpS($o: suppliers_insert_input!) { insert_suppliers_one(object:$o, on_conflict:{constraint: suppliers_pkey, update_columns:[name, origin, contact, phone, email, notes, active]}) { id } }`
 const SET_STAFF_BRANCHES = `mutation SB($staff: uuid!, $objs: [staff_branches_insert_input!]!) { delete_staff_branches(where:{staff_id:{_eq:$staff}}) { affected_rows } insert_staff_branches(objects:$objs) { affected_rows } }`
+const SET_ROLE_PERM = `mutation RP($o: role_permissions_insert_input!) { insert_role_permissions_one(object:$o, on_conflict:{constraint: role_permissions_pkey, update_columns:[access]}) { role } }`
 const ORIGINS: Record<string, string> = { china: 'China', zona_libre: 'Zona Libre', eeuu: 'Estados Unidos', local: 'Local', otro: 'Otro' }
 const PERMS: Record<string, string[]> = { admin: ['Todo', 'Todas las compañías y sucursales', 'Descuento sin límite', 'Configuración'], gerente: ['Su compañía', 'Cierre de caja', 'Descuentos hasta su límite', 'Reportes', 'Intercompany'], vendedor: ['POS y cotizaciones', 'Clientes', 'Descuentos hasta su límite'], optometrista: ['Exámenes y RX', 'Agenda', 'Clientes'], cajero: ['Caja: apertura, cierre, arqueo', 'Cobros'], almacen: ['Stock, traspasos, conteos', 'Etiquetas'] }
 
 export default function Configuracion() {
-  const { companies, branches, staff } = useApp()
+  const { companies, branches, staff, rolePermissions } = useApp()
   const qc = useQueryClient()
   const [tab, setTab] = useState<'companias' | 'sucursales' | 'personal' | 'roles' | 'motivos' | 'proveedores' | 'auditoria'>('companias')
   const cat = useQuery({ queryKey: ['config-cat'], queryFn: () => gql<{ consult_reasons: { id: string; name: string; sort: number; active: boolean }[]; suppliers: { id: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean }[] }>(REASONS_Q), enabled: tab === 'motivos' || tab === 'proveedores' })
   const [newReason, setNewReason] = useState('')
   const [supEdit, setSupEdit] = useState<{ id?: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean } | null>(null)
   const [stBranches, setStBranches] = useState<string[]>([])
+  const [stAll, setStAll] = useState(false)
+  const [stPerms, setStPerms] = useState<Record<string, Access> | null>(null)
+  const roleAccess = (role: string, module: string): Access => role === 'admin' ? 'editar' : (rolePermissions.find((p) => p.role === role && p.module === module)?.access ?? 'ninguno')
   const [toast, setToast] = useState<string | null>(null)
   const [coEdit, setCoEdit] = useState<Partial<Company> | null>(null)
   const [brEdit, setBrEdit] = useState<Partial<Branch> | null>(null)
@@ -41,14 +46,14 @@ export default function Configuracion() {
   const saveCo = async () => { const { id, ...rest } = coEdit!; if (id) await gql(UP_COMPANY, { id, set: rest }); else await gql(IN_COMPANY, { o: { ...rest, invoice_prefix: rest.invoice_prefix ?? rest.code } }); done('Compañía guardada') }
   const saveBr = async () => { const { id, ...rest } = brEdit!; if (id) await gql(UP_BRANCH, { id, set: rest }); else await gql(IN_BRANCH, { o: rest }); done('Sucursal guardada') }
   const saveSt = async () => {
-    const { id, staff_branches: _sb, ...rest } = stEdit!
+    const { id, staff_branches: _sb, all_branches: _ab, permissions: _pm, ...rest } = stEdit!
     let sid = id
-    if (id) await gql(UP_STAFF, { id, set: { ...rest, branch_id: stBranches[0] ?? null } })
-    else { const r = await gql<{ insert_staff_one: { id: string } }>(IN_STAFF.replace('{ id }', '{ id }'), { o: { ...rest, branch_id: stBranches[0] ?? null } }); sid = r.insert_staff_one.id }
-    if (sid) await gql(SET_STAFF_BRANCHES, { staff: sid, objs: stBranches.map((b) => ({ staff_id: sid, branch_id: b })) })
+    if (id) await gql(UP_STAFF, { id, set: { ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms } })
+    else { const r = await gql<{ insert_staff_one: { id: string } }>(IN_STAFF, { o: { ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms } }); sid = r.insert_staff_one.id }
+    if (sid) await gql(SET_STAFF_BRANCHES, { staff: sid, objs: stAll ? [] : stBranches.map((b) => ({ staff_id: sid, branch_id: b })) })
     done('Usuario guardado')
   }
-  const openSt = (x: Partial<Staff>) => { setStEdit(x); setStBranches(x.staff_branches?.map((b) => b.branch_id) ?? (x.branch_id ? [x.branch_id] : [])) }
+  const openSt = (x: Partial<Staff>) => { setStEdit(x); setStAll(!!x.all_branches || x.role === 'admin'); setStPerms((x.permissions as Record<string, Access> | null) ?? null); setStBranches(x.staff_branches?.map((b) => b.branch_id) ?? (x.branch_id ? [x.branch_id] : [])) }
 
   return (
     <div className="space-y-4">
@@ -72,11 +77,16 @@ export default function Configuracion() {
 
       {tab === 'personal' && <Card padded={false} title="Personal y permisos" actions={<button className="btn-primary h-8 text-xs" onClick={() => openSt({ company_id: companies[0]?.id, branch_id: branches[0]?.id, name: '', email: '', role: 'vendedor', commission_pct: 3, max_discount_pct: 10, monthly_goal: 0, active: true })}><Plus size={13} />Nuevo usuario</button>}>
         <table className="table"><thead><tr><th>Nombre</th><th>Rol</th><th>Compañía</th><th>Sucursal</th><th className="text-right">Comisión</th><th className="text-right">Desc. máx.</th><th className="text-right">Meta</th><th>Acceso</th><th /></tr></thead><tbody>
-          {staff.map((s) => <tr key={s.id}><td><span className="flex items-center gap-2"><Avatar name={s.name} className="h-7 w-7 text-[10px]" /><div><b>{s.name}</b><div className="text-[11px] text-slate-400">{s.email}</div></div></span></td><td><Badge tone={s.role === 'admin' ? 'dark' : s.role === 'gerente' ? 'violet' : s.role === 'optometrista' ? 'blue' : 'slate'}>{ROLES[s.role]}</Badge></td><td className="text-xs">{companies.find((c) => c.id === s.company_id)?.code}</td><td className="text-xs">{branches.find((b) => b.id === s.branch_id)?.name ?? <span className="text-slate-400">todas</span>}</td><td className="text-right">{s.commission_pct}%</td><td className="text-right">{s.max_discount_pct}%</td><td className="text-right">{Number(s.monthly_goal) ? money(s.monthly_goal) : '—'}</td><td>{s.user_id ? <Badge tone="green">vinculado</Badge> : <Badge tone="amber">sin login</Badge>}</td><td><button className="btn-ghost h-7 text-xs" onClick={() => openSt(s)}><Pencil size={12} /></button></td></tr>)}
+          {staff.map((s) => <tr key={s.id}><td><span className="flex items-center gap-2"><Avatar name={s.name} className="h-7 w-7 text-[10px]" /><div><b>{s.name}</b><div className="text-[11px] text-slate-400">{s.email}</div></div></span></td><td><Badge tone={s.role === 'admin' ? 'dark' : s.role === 'gerente' ? 'violet' : s.role === 'optometrista' ? 'blue' : 'slate'}>{ROLES[s.role]}</Badge></td><td className="text-xs">{companies.find((c) => c.id === s.company_id)?.code}</td><td className="text-xs">{(s.role === 'admin' || s.all_branches) ? <Badge tone="blue">Todas</Badge> : (s.staff_branches?.length ? s.staff_branches.map((x) => branches.find((b) => b.id === x.branch_id)?.name).filter(Boolean).join(', ') : branches.find((b) => b.id === s.branch_id)?.name ?? <span className="text-rose-500">ninguna</span>)}{s.permissions && <Badge tone="violet">permisos personalizados</Badge>}</td><td className="text-right">{s.commission_pct}%</td><td className="text-right">{s.max_discount_pct}%</td><td className="text-right">{Number(s.monthly_goal) ? money(s.monthly_goal) : '—'}</td><td>{s.user_id ? <Badge tone="green">vinculado</Badge> : <Badge tone="amber">sin login</Badge>}</td><td><button className="btn-ghost h-7 text-xs" onClick={() => openSt(s)}><Pencil size={12} /></button></td></tr>)}
         </tbody></table>
       </Card>}
 
-      {tab === 'roles' && <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{Object.entries(PERMS).map(([r, p]) => <Card key={r} title={<span className="flex items-center gap-2"><Shield size={15} className="text-brand-600" />{ROLES[r]}</span>} subtitle={`${staff.filter((s) => s.role === r).length} usuarios`}><ul className="text-sm space-y-1.5">{p.map((x) => <li key={x} className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-brand-500" />{x}</li>)}</ul><p className="mt-3 text-[11px] text-slate-400">El alcance efectivo se calcula como rol ∩ compañía ∩ sucursal del usuario. En Hasura se aplican como permisos por fila (X-Hasura-Company-Id / X-Hasura-Branch-Id) en la siguiente iteración.</p></Card>)}</div>}
+      {tab === 'roles' && <Card padded={false} title={<span className="flex items-center gap-2"><Shield size={15} className="text-brand-600" />Permisos por módulo y rol</span>} subtitle="Sin acceso: el módulo no aparece · Solo ver: consulta sin guardar cambios · Editar: acceso completo. Se puede personalizar por usuario en Personal.">
+        <div className="overflow-x-auto"><table className="table text-xs"><thead><tr><th>Módulo</th>{Object.keys(ROLES).map((r) => <th key={r} className="text-center">{ROLES[r]}</th>)}</tr></thead><tbody>
+          {MODULES.map((m) => <tr key={m.key}><td className="font-semibold">{m.label}</td>{Object.keys(ROLES).map((r) => <td key={r} className="text-center">{r === 'admin' ? <Badge tone="green">Editar</Badge> : <select className={`input h-8 text-xs ${roleAccess(r, m.key) === 'editar' ? 'text-emerald-700' : roleAccess(r, m.key) === 'ver' ? 'text-blue-700' : 'text-slate-400'}`} value={roleAccess(r, m.key)} onChange={async (e) => { await gql(SET_ROLE_PERM, { o: { role: r, module: m.key, access: e.target.value } }); void qc.invalidateQueries({ queryKey: ['org'] }) }}>{(['ninguno', 'ver', 'editar'] as Access[]).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}</select>}</td>)}</tr>)}
+        </tbody></table></div>
+        <div className="px-5 py-3 text-[11px] text-slate-500 border-t border-slate-100">Además: {Object.entries(PERMS).map(([r, p]) => `${ROLES[r]} — ${p.join(', ')}`).join(' · ')}</div>
+      </Card>}
 
       {tab === 'motivos' && <Card title={<span className="flex items-center gap-2"><ListChecks size={15} className="text-brand-600" />Motivos de consulta</span>} subtitle="Aparecen como sugerencias al crear un examen">
         <div className="flex gap-2 mb-3"><input className="input h-9" placeholder="Nuevo motivo…" value={newReason} onChange={(e) => setNewReason(e.target.value)} /><button className="btn-primary h-9" disabled={!newReason.trim()} onClick={async () => { await gql(IN_REASON, { o: { name: newReason.trim(), sort: (cat.data?.consult_reasons.length ?? 0) + 1 } }); setNewReason(''); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }}><Plus size={14} />Añadir</button></div>
@@ -134,13 +144,17 @@ export default function Configuracion() {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={brEdit.active ?? true} onChange={(e) => setBrEdit({ ...brEdit, active: e.target.checked })} />Activa</label>
         </div>}
       </Modal>
-      <Modal open={!!stEdit} onClose={() => setStEdit(null)} title={stEdit?.id ? 'Editar usuario' : 'Nuevo usuario'} size="md" footer={<><button className="btn-secondary" onClick={() => setStEdit(null)}>Cancelar</button><button className="btn-primary" onClick={saveSt} disabled={!stEdit?.name}>Guardar</button></>}>
+      <Modal open={!!stEdit} onClose={() => setStEdit(null)} title={stEdit?.id ? 'Editar usuario' : 'Nuevo usuario'} size="md" footer={<><button className="btn-secondary" onClick={() => setStEdit(null)}>Cancelar</button><button className="btn-primary" onClick={saveSt} disabled={(!stAll && stEdit?.role !== 'admin' && stBranches.length === 0) || !stEdit?.name}>Guardar</button></>}>
         {stEdit && <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nombre"><input className="input" value={stEdit.name ?? ''} onChange={(e) => setStEdit({ ...stEdit, name: e.target.value })} /></Field>
           <Field label="Email (para vincular login)"><input className="input" value={stEdit.email ?? ''} onChange={(e) => setStEdit({ ...stEdit, email: e.target.value })} /></Field>
           <Field label="Rol"><select className="input" value={stEdit.role ?? 'vendedor'} onChange={(e) => setStEdit({ ...stEdit, role: e.target.value as Staff['role'] })}>{Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
           <Field label="Compañía"><select className="input" value={stEdit.company_id ?? ''} onChange={(e) => setStEdit({ ...stEdit, company_id: e.target.value })}>{companies.map((c) => <option key={c.id} value={c.id}>{c.code}</option>)}</select></Field>
-          <Field label="Sucursales con acceso" className="sm:col-span-2" hint={stEdit.role === 'admin' ? 'El administrador ve todas las sucursales.' : 'Solo verá las sucursales marcadas. Sin ninguna marcada no tendrá acceso.'}><div className="flex flex-wrap gap-2">{branches.map((b) => <label key={b.id} className="flex items-center gap-1.5 text-xs rounded-lg border border-slate-200 px-2 py-1.5"><input type="checkbox" checked={stBranches.includes(b.id)} onChange={(e) => setStBranches(e.target.checked ? [...stBranches, b.id] : stBranches.filter((x) => x !== b.id))} />{b.name} <span className="text-slate-400">{companies.find((c) => c.id === b.company_id)?.code}</span></label>)}</div></Field>
+          <Field label="Ópticas (sucursales) a las que pertenece" className="sm:col-span-2" hint={stEdit.role === 'admin' ? 'El administrador ve todas las ópticas.' : stAll ? 'Verá todas las ópticas del grupo, también las que se creen después.' : 'Solo verá las ópticas marcadas.'}><div className="flex flex-wrap gap-2 mb-2"><label className="flex items-center gap-1.5 text-xs font-semibold rounded-lg border border-brand-200 bg-brand-50 text-brand-800 px-2 py-1.5"><input type="checkbox" checked={stAll || stEdit.role === 'admin'} disabled={stEdit.role === 'admin'} onChange={(e) => setStAll(e.target.checked)} />Todas las ópticas</label></div>{!(stAll || stEdit.role === 'admin') && <div className="flex flex-wrap gap-2">{branches.map((b) => <label key={b.id} className="flex items-center gap-1.5 text-xs rounded-lg border border-slate-200 px-2 py-1.5"><input type="checkbox" checked={stBranches.includes(b.id)} onChange={(e) => setStBranches(e.target.checked ? [...stBranches, b.id] : stBranches.filter((x) => x !== b.id))} />{b.name} <span className="text-slate-400">{companies.find((c) => c.id === b.company_id)?.code}</span></label>)}</div>}</Field>
+          {stEdit.role !== 'admin' && <div className="sm:col-span-2 rounded-xl border border-slate-200 p-3">
+            <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={!!stPerms} onChange={(e) => setStPerms(e.target.checked ? Object.fromEntries(MODULES.map((m) => [m.key, roleAccess(stEdit.role ?? 'vendedor', m.key)])) : null)} />Permisos personalizados para este usuario {!stPerms && <span className="font-normal text-slate-400">(usa los de su rol: {ROLES[stEdit.role ?? 'vendedor']})</span>}</label>
+            {stPerms && <div className="grid sm:grid-cols-3 gap-2 mt-2">{MODULES.map((m) => <label key={m.key} className="text-[11px] text-slate-600"><span className="block mb-0.5">{m.label}</span><select className="input h-8 text-xs" value={stPerms[m.key] ?? 'ninguno'} onChange={(e) => setStPerms({ ...stPerms, [m.key]: e.target.value as Access })}>{(['ninguno', 'ver', 'editar'] as Access[]).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}</select></label>)}</div>}
+          </div>}
           <Field label="Comisión %"><input type="number" className="input" value={stEdit.commission_pct ?? 0} onChange={(e) => setStEdit({ ...stEdit, commission_pct: Number(e.target.value) })} /></Field>
           <Field label="Descuento máximo %"><input type="number" className="input" value={stEdit.max_discount_pct ?? 0} onChange={(e) => setStEdit({ ...stEdit, max_discount_pct: Number(e.target.value) })} /></Field>
           <Field label="Meta mensual"><input type="number" className="input" value={stEdit.monthly_goal ?? 0} onChange={(e) => setStEdit({ ...stEdit, monthly_goal: Number(e.target.value) })} /></Field>
