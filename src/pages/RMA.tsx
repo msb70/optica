@@ -3,21 +3,38 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Plus, ArrowRight } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, write, likeTerm } from '../lib/supabase'
+import { insertNested, rmaReplace } from '../lib/ops'
 import { Card, PageHeader, Loading, StatusBadge, Modal, Field, Tabs, Badge, Empty, Toast, Avatar } from '../components/ui'
 import { money, fdate, fullName, STATUS_LABEL } from '../lib/format'
 import type { Rma, Sale } from '../lib/types'
 
-const Q = `query Rmas($branch: uuid!, $open: Boolean!) { rmas(where:{branch_id:{_eq:$branch}, status:{_nin:["resuelto","cerrado","rechazado"]}}, order_by:{created_at:desc}) @skip(if:$open) { ...R }
-  closed: rmas(where:{branch_id:{_eq:$branch}, status:{_in:["resuelto","cerrado","rechazado"]}}, order_by:{created_at:desc}, limit:80) @include(if:$open) { ...R } }
-  fragment R on rmas { id number type status reason resolution refund_amount refund_method created_at resolved_at warranty_part warranty_until in_warranty replacement_product_id lab_order_id replacement_product { name sku } lab_order { number status } customer_id customer { first_name last_name phone } product { name sku } sale { number total sale_date } rma_events(order_by:{created_at:desc}) { id status note created_at } }`
-const SALES_Q = `query RmaSales($q: String!, $branch: uuid!) { sales(where:{branch_id:{_eq:$branch}, _or:[{number:{_ilike:$q}},{customer:{last_name:{_ilike:$q}}},{customer:{first_name:{_ilike:$q}}}]}, order_by:{sale_date:desc}, limit:8) { id number total sale_date delivered_at customer_id customer { first_name last_name } sale_items { product_id description category } } }`
-const INSERT = `mutation NewRma($o: rmas_insert_input!) { insert_rmas_one(object:$o) { id number } }`
-const ADV = `mutation AdvRma($id: uuid!, $set: rmas_set_input!, $ev: rma_events_insert_input!) { update_rmas_by_pk(pk_columns:{id:$id}, _set:$set) { id } insert_rma_events_one(object:$ev) { id } }`
+const R = 'id,number,type,status,reason,resolution,refund_amount,refund_method,created_at,resolved_at,warranty_part,warranty_until,in_warranty,replacement_product_id,lab_order_id,replacement_product:products!replacement_product_id(name,sku),lab_order:lab_orders!lab_order_id(number,status),customer_id,customer:customers(first_name,last_name,phone),product:products!product_id(name,sku),sale:sales!sale_id(number,total,sale_date),rma_events(id,status,note,created_at)'
+async function loadRmas(branch: string, closed: boolean): Promise<{ rmas?: Rma[]; closed?: Rma[] }> {
+  const base = sb.from('rmas').select(R).eq('branch_id', branch).order('created_at', { ascending: false }).order('created_at', { referencedTable: 'rma_events', ascending: false })
+  const rows = closed ? await run(base.in('status', ['resuelto', 'cerrado', 'rechazado']).limit(80)) : await run(base.not('status', 'in', '(resuelto,cerrado,rechazado)'))
+  return closed ? { closed: rows as unknown as Rma[] } : { rmas: rows as unknown as Rma[] }
+}
+
+
+type RmaSale = Sale & { sale_items: { product_id?: string | null; description: string }[] }
+async function searchSales(q: string, branch: string) {
+  const t = likeTerm(q)
+  const cols = 'id,number,total,sale_date,delivered_at,customer_id,customer:customers!inner(first_name,last_name),sale_items(product_id,description,category)'
+  const [byNumber, byName] = await Promise.all([
+    run(sb.from('sales').select(cols).eq('branch_id', branch).ilike('number', t).order('sale_date', { ascending: false }).limit(8)),
+    run(sb.from('sales').select(cols).eq('branch_id', branch).or(`last_name.ilike.${t},first_name.ilike.${t}`, { referencedTable: 'customer' }).order('sale_date', { ascending: false }).limit(8)),
+  ])
+  const all = new Map([...(byNumber as unknown as RmaSale[]), ...(byName as unknown as RmaSale[])].map((s) => [s.id, s]))
+  return { sales: [...all.values()].sort((a, b) => b.sale_date.localeCompare(a.sale_date)).slice(0, 8) }
+}
+
+
 const RMA_METHODS: [string, string][] = [['efectivo', 'Efectivo'], ['tarjeta', 'Tarjeta'], ['vale', 'Vale'], ['saldo_cliente', 'Saldo al cliente']]
 const methodLabel = (m?: string | null) => RMA_METHODS.find(([v]) => v === m)?.[1] ?? m ?? ''
-const REPLACE = `mutation Rep($id: uuid!, $p: uuid, $lab: Boolean!, $st: uuid) { rma_replace(args:{p_rma_id:$id, p_product_id:$p, p_create_lab:$lab, p_staff_id:$st}) { id } }`
-const PRODS = `query RP($q: String!, $branch: uuid!) { products(where:{active:{_eq:true}, category:{_in:["armazon","solar","lente_contacto","accesorio"]}, _or:[{name:{_ilike:$q}},{sku:{_ilike:$q}}]}, limit:8) { id sku name stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
+
+const searchProducts = (q: string, branch: string) => run(sb.from('products').select('id,sku,name,stock(qty)').eq('active', true).in('category', ['armazon', 'solar', 'lente_contacto', 'accesorio'])
+  .or(`name.ilike.${likeTerm(q)},sku.ilike.${likeTerm(q)}`).eq('stock.branch_id', branch).limit(8)).then((products) => ({ products: products as unknown as { id: string; sku: string; name: string; stock: { qty: number }[] }[] }))
 const PART: Record<string, string> = { armazon: 'Armazón', lente: 'Lente', otro: 'Otro' }
 const FLOW = ['abierto', 'en_revision', 'aprobado', 'en_reparacion', 'resuelto', 'cerrado']
 
@@ -27,14 +44,15 @@ export default function RMA() {
   const [sel, setSel] = useState<Rma | null>(null)
   const [nuevo, setNuevo] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const q = useQuery({ queryKey: ['rmas', branch?.id, view], queryFn: () => gql<{ rmas?: Rma[]; closed?: Rma[] }>(Q, { branch: branch!.id, open: view === 'cerrados' }), enabled: !!branch })
+  const q = useQuery({ queryKey: ['rmas', branch?.id, view], queryFn: () => loadRmas(branch!.id, view === 'cerrados'), enabled: !!branch })
   const list = (view === 'abiertos' ? q.data?.rmas : q.data?.closed) ?? []
   const [res, setRes] = useState({ resolution: '', refund_amount: 0, refund_method: 'efectivo', next: '' })
 
   const advance = async (r: Rma, to: string) => {
     const set: Record<string, unknown> = { status: to }
     if (['resuelto', 'cerrado', 'rechazado'].includes(to)) { set.resolved_at = new Date().toISOString(); set.resolution = res.resolution || null; const paid = r.type === 'devolucion' || r.type === 'reparacion'; set.refund_amount = paid ? res.refund_amount : 0; set.refund_method = paid && res.refund_amount > 0 ? res.refund_method : null }
-    await gql(ADV, { id: r.id, set, ev: { rma_id: r.id, status: to, staff_id: me?.id ?? null, note: res.resolution || `Estado → ${STATUS_LABEL[to]}` } })
+    await write(() => sb.from('rmas').update(set).eq('id', r.id))
+    await write(() => sb.from('rma_events').insert({ rma_id: r.id, status: to, staff_id: me?.id ?? null, note: res.resolution || `Estado → ${STATUS_LABEL[to]}` }))
     setSel(null); setToast(`${r.number} → ${STATUS_LABEL[to]}`); void q.refetch()
   }
 
@@ -89,14 +107,15 @@ function NuevoRma({ onClose, onCreated, branchId, companyId, prefix }: { onClose
   const [sale, setSale] = useState<(Sale & { sale_items: { product_id?: string | null; description: string }[] }) | null>(null)
   const { company } = useApp()
   const [f, setF] = useState({ type: 'reparacion', reason: '', product_id: '', warranty_part: 'armazon' })
-  const sales = useQuery({ queryKey: ['rma-sales', branchId, q], queryFn: () => gql<{ sales: (Sale & { sale_items: { product_id?: string | null; description: string }[] })[] }>(SALES_Q, { q: `%${q}%`, branch: branchId }), enabled: q.length >= 2 })
+  const sales = useQuery({ queryKey: ['rma-sales', branchId, q], queryFn: () => searchSales(q, branchId), enabled: q.length >= 2 })
   const isWarranty = f.type === 'garantia' || f.type === 'cambio'
   const months = f.warranty_part === 'lente' ? Number(company?.warranty_lens_months ?? 12) : Number(company?.warranty_frame_months ?? 12)
   const from = sale ? ((sale as Sale & { delivered_at?: string | null }).delivered_at ?? sale.sale_date) : null
   const until = from ? (() => { const d = new Date(from); d.setMonth(d.getMonth() + months); return d.toISOString().slice(0, 10) })() : null
   const inW = until ? until >= new Date().toISOString().slice(0, 10) : null
   const save = async () => {
-    const r = await gql<{ insert_rmas_one: { number: string } }>(INSERT, { o: { company_id: companyId, branch_id: branchId, sale_id: sale!.id, customer_id: sale!.customer_id, product_id: f.product_id || null, warranty_part: isWarranty ? f.warranty_part : null, warranty_until: isWarranty ? until : null, in_warranty: isWarranty ? inW : null, number: `${prefix}-RMA-${String(Date.now()).slice(-6)}`, type: f.type, status: 'abierto', reason: f.reason, rma_events: { data: [{ status: 'abierto', note: 'Reclamo registrado en tienda' }] } } })
+    const created = await insertNested('rmas', { company_id: companyId, branch_id: branchId, sale_id: sale!.id, customer_id: sale!.customer_id, product_id: f.product_id || null, warranty_part: isWarranty ? f.warranty_part : null, warranty_until: isWarranty ? until : null, in_warranty: isWarranty ? inW : null, number: `${prefix}-RMA-${String(Date.now()).slice(-6)}`, type: f.type, status: 'abierto', reason: f.reason }, 'rma_events', 'rma_id', [{ status: 'abierto', note: 'Reclamo registrado en tienda' }])
+    const r = { insert_rmas_one: created }
     onCreated(r.insert_rmas_one.number)
   }
   return (
@@ -125,8 +144,8 @@ function Reemplazo({ rma, branchId, staffId, onDone }: { rma: Rma; branchId: str
   const [prod, setProd] = useState<{ id: string; name: string; sku: string } | null>(null)
   const [lab, setLab] = useState(rma.warranty_part === 'armazon')
   const [busy, setBusy] = useState(false)
-  const r = useQuery({ queryKey: ['rma-prod', q, branchId], queryFn: () => gql<{ products: { id: string; sku: string; name: string; stock: { qty: number }[] }[] }>(PRODS, { q: `%${q}%`, branch: branchId }), enabled: q.length >= 2 })
-  const go = async () => { setBusy(true); try { await gql(REPLACE, { id: rma.id, p: prod?.id ?? null, lab, st: staffId }); onDone(`${rma.number}: ${prod ? `cambio por ${prod.name} (sale de stock)` : ''}${prod && lab ? ' · ' : ''}${lab ? 'orden de laboratorio creada' : ''}`) } finally { setBusy(false) } }
+  const r = useQuery({ queryKey: ['rma-prod', q, branchId], queryFn: () => searchProducts(q, branchId), enabled: q.length >= 2 })
+  const go = async () => { setBusy(true); try { await rmaReplace(rma.id, prod?.id ?? null, lab, staffId); onDone(`${rma.number}: ${prod ? `cambio por ${prod.name} (sale de stock)` : ''}${prod && lab ? ' · ' : ''}${lab ? 'orden de laboratorio creada' : ''}`) } finally { setBusy(false) } }
   return <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
     <div className="text-xs font-semibold text-violet-800">Cambio por otra unidad</div>
     <div className="relative">{prod ? <div className="input h-9 flex items-center gap-2 text-sm"><b>{prod.name}</b><span className="text-xs text-slate-400">{prod.sku}</span><button className="ml-auto text-xs text-slate-400" onClick={() => setProd(null)}>cambiar</button></div>

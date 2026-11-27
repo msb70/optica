@@ -2,18 +2,26 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, FileDown, ChevronDown, X, Filter } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll } from '../lib/supabase'
 import { Card, PageHeader, Loading, Tabs, Avatar, Progress } from '../components/ui'
 import { Bars, Lines, Donut, AreaTrend } from '../components/charts'
 import { money, num, pct, monthLabel, monthStartISO, SOURCES, CATEGORIES } from '../lib/format'
 
-const Q = `query Reports($company: uuid!, $from: date!, $fromTs: timestamptz!) {
-  kpi: v_kpi_branch_month(where:{company_id:{_eq:$company}, month:{_gte:$from}}, order_by:{month:asc}) { branch_id month avg_delivery_days }
-  funnel: v_funnel_month(where:{company_id:{_eq:$company}, month:{_gte:$from}}) { branch_id month citas examenes cotizaciones ventas entregas branch { name } }
-  sales: sales(where:{company_id:{_eq:$company}, sale_date:{_gte:$fromTs}, status:{_in:["completada","parcial"]}}) { id branch_id seller_id optometrist_id source sale_date total tax discount cost_total commission_amount sale_items { product_id category qty line_total unit_cost description product { brand name sku } } }
-  rmas: rmas(where:{company_id:{_eq:$company}, created_at:{_gte:$fromTs}}) { type status refund_amount branch_id branch { name } }
-  companies_all: v_kpi_branch_month(where:{month:{_gte:$from}}) { month revenue tickets company { code } }
-}`
+async function loadReports(company: string, from: string, fromTs: string, companies: { id: string; code: string }[], branchName: (id: string) => string | undefined) {
+  const [kpi, funnel, sales, rmas, all] = await Promise.all([
+    run(sb.from('v_kpi_branch_month').select('branch_id,month,avg_delivery_days').eq('company_id', company).gte('month', from).order('month')),
+    run(sb.from('v_funnel_month').select('branch_id,month,citas,examenes,cotizaciones,ventas,entregas').eq('company_id', company).gte('month', from)),
+    runAll(() => sb.from('sales').select('id,branch_id,seller_id,optometrist_id,source,sale_date,total,tax,discount,cost_total,commission_amount,sale_items(product_id,category,qty,line_total,unit_cost,description,product:products(brand,name,sku))').eq('company_id', company).gte('sale_date', fromTs).in('status', ['completada', 'parcial']).order('sale_date').order('id')),
+    runAll(() => sb.from('rmas').select('type,status,refund_amount,branch_id').eq('company_id', company).gte('created_at', fromTs).order('id')),
+    run(sb.from('v_kpi_branch_month').select('month,revenue,tickets,company_id').gte('month', from)),
+  ])
+  const code = new Map(companies.map((c) => [c.id, c.code]))
+  const named = (rows: R[]): R[] => rows.map((r) => ({ ...r, branch: { name: branchName(r.branch_id as string) } }))
+  return {
+    kpi: kpi as R[], funnel: named(funnel as R[]), sales: sales as unknown as Sale[], rmas: named(rmas as R[]),
+    companies_all: (all as R[]).map((r): R => ({ ...r, company: { code: code.get(r.company_id as string) } })),
+  }
+}
 type Item = { product_id: string | null; category: string | null; qty: number; line_total: number; unit_cost: number; description: string; product?: { brand?: string | null; name: string; sku: string } | null }
 type Sale = { id: string; branch_id: string; seller_id: string | null; optometrist_id: string | null; source: string | null; sale_date: string; total: number; tax: number; discount: number; cost_total: number; commission_amount: number; sale_items: Item[] }
 type Filters = { branches: string[]; sellers: string[]; optos: string[]; products: string[]; categories: string[]; brands: string[]; sources: string[] }
@@ -42,13 +50,13 @@ function MultiSelect({ label, options, value, onChange }: { label: string; optio
 type R = Record<string, unknown>
 
 export default function Reportes() {
-  const { company, branches: allBranches, staff } = useApp()
+  const { company, companies, branches: allBranches, staff } = useApp()
   const [months, setMonths] = useState<1 | 3 | 6 | 12>(6)
   const [f, setF] = useState<Filters>(EMPTY)
   const [printing, setPrinting] = useState(false)
   const [tab, setTab] = useState<'ventas' | 'vendedores' | 'productos' | 'origen' | 'operacion' | 'grupo'>('ventas')
   const from = monthStartISO(months - 1)
-  const q = useQuery({ queryKey: ['reports', company?.id, from], queryFn: () => gql<{ kpi: R[]; funnel: R[]; sales: Sale[]; rmas: R[]; companies_all: R[] }>(Q, { company: company!.id, from, fromTs: from + 'T00:00:00Z' }), enabled: !!company })
+  const q = useQuery({ queryKey: ['reports', company?.id, from], queryFn: () => loadReports(company!.id, from, from + 'T00:00:00Z', companies, (id) => allBranches.find((b) => b.id === id)?.name), enabled: !!company })
   const d = q.data
   const companyBranches = allBranches.filter((b) => b.company_id === company?.id)
   const staffName = (id: string | null) => staff.find((x) => x.id === id)?.name ?? 'Sin asignar'

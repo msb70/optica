@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { gql } from './nhost'
+import { sb, run } from './supabase'
 import type { Access } from './permissions'
 import { useAuth } from './auth'
 import type { Company, Branch, Staff, CashSession } from './types'
@@ -26,17 +26,23 @@ interface AppCtx {
 
 const Ctx = createContext<AppCtx | null>(null)
 
-const ORG_QUERY = `query Org { companies(order_by:{code:asc}) { id code legal_name trade_name tax_id country currency tax_rate invoice_prefix zoho_org_id active allow_negative_stock min_deposit_pct warranty_frame_months warranty_lens_months }
-  branches(order_by:{name:asc}) { id company_id code name address phone monthly_goal active zoho_scope zoho_org_id zoho_tag }
-  staff(where:{active:{_eq:true}}, order_by:{name:asc}) { id user_id company_id branch_id name email role commission_pct max_discount_pct monthly_goal active all_branches permissions invited_at staff_branches { branch_id } }
-  role_permissions { role module access } }`
-
-const CASH_QUERY = `query OpenCash($branch: uuid!) { cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"abierta"}}, order_by:{opened_at:desc}, limit:1) {
-  id company_id branch_id opened_by opened_at closed_at opening_amount expected_cash counted_cash difference status notes opener { id name } } }`
+type OrgData = { companies: Company[]; branches: Branch[]; staff: Staff[]; role_permissions: { role: string; module: string; access: Access }[] }
+async function loadOrg(): Promise<OrgData> {
+  const [companies, branches, staff, role_permissions] = await Promise.all([
+    run(sb.from('companies').select('id,code,legal_name,trade_name,tax_id,country,currency,tax_rate,invoice_prefix,zoho_org_id,active,allow_negative_stock,min_deposit_pct,warranty_frame_months,warranty_lens_months').order('code')),
+    run(sb.from('branches').select('id,company_id,code,name,address,phone,monthly_goal,active,zoho_scope,zoho_org_id,zoho_tag,optilab_account').order('name')),
+    run(sb.from('staff').select('id,user_id,company_id,branch_id,name,email,role,commission_pct,max_discount_pct,monthly_goal,active,all_branches,permissions,invited_at,staff_branches(branch_id)').eq('active', true).order('name')),
+    run(sb.from('role_permissions').select('role,module,access')),
+  ])
+  return { companies, branches, staff, role_permissions } as OrgData
+}
+const loadCash = (branch: string) => run(sb.from('cash_sessions')
+  .select('id,company_id,branch_id,opened_by,opened_at,closed_at,opening_amount,expected_cash,counted_cash,difference,status,notes,opener:staff!opened_by(id,name)')
+  .eq('branch_id', branch).eq('status', 'abierta').order('opened_at', { ascending: false }).limit(1)) as unknown as Promise<CashSession[]>
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  const org = useQuery({ queryKey: ['org'], queryFn: () => gql<{ companies: Company[]; branches: Branch[]; staff: Staff[]; role_permissions: { role: string; module: string; access: Access }[] }>(ORG_QUERY), staleTime: 60_000 })
+  const org = useQuery({ queryKey: ['org'], queryFn: loadOrg, staleTime: 60_000 })
   const allCompanies = org.data?.companies ?? []
   const allBranches = org.data?.branches ?? []
   const staff = org.data?.staff ?? []
@@ -85,13 +91,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (custom) return custom
     return rolePermissions.find((p) => p.role === me.role && p.module === module)?.access ?? 'ninguno'
   }
-  const cash = useQuery({ queryKey: ['cash-open', branchId], queryFn: () => gql<{ cash_sessions: CashSession[] }>(CASH_QUERY, { branch: branchId }), enabled: !!branchId, refetchInterval: 30_000 })
+  const cash = useQuery({ queryKey: ['cash-open', branchId], queryFn: () => loadCash(branchId), enabled: !!branchId, refetchInterval: 30_000 })
 
   const value: AppCtx = {
     companies, branches, staff, company, branch, me, rolePermissions, access,
     setCompanyId: (id) => { setCompanyIdState(id); const first = branches.find((b) => b.company_id === id); if (first) setBranchIdState(first.id) },
     setBranchId: (id) => { setBranchIdState(id); const b = branches.find((x) => x.id === id); if (b && b.company_id !== companyId) setCompanyIdState(b.company_id) },
-    cashSession: cash.data?.cash_sessions?.[0] ?? null,
+    cashSession: cash.data?.[0] ?? null,
     refreshCash: () => { void cash.refetch() },
     loading: org.isLoading,
     organizationError: org.error,

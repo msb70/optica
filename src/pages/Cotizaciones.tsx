@@ -4,21 +4,33 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { Plus, ShoppingCart, PhoneCall, XCircle, Trash2, Clock, Search, HandCoins, PackageCheck } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll, write, likeTerm } from '../lib/supabase'
+import { addQuoteDeposit, deliverQuote, insertNested } from '../lib/ops'
 import { Card, PageHeader, Loading, StatusBadge, Avatar, Tabs, Modal, Field, Empty, Toast, Badge } from '../components/ui'
 import RxTable from '../components/RxTable'
 import PayModal, { type Pay } from '../components/PayModal'
 import { money, fdate, fullName, ago, CATEGORIES } from '../lib/format'
 import type { Quote, Product, Customer, Rx } from '../lib/types'
 
-const LIST = `query Quotes($branch: uuid!, $status: [String!]) { quotes(where:{branch_id:{_eq:$branch}, status:{_in:$status}}, order_by:{created_at:desc}, limit: 120) { id number status subtotal discount tax total deposit_total approved_at ready_at lab_orders { id number status promised_at } valid_until next_followup_at last_contact_at lost_reason created_at customer_id customer { id first_name last_name phone } seller { name } exam_id quote_items { id description qty unit_price discount_pct line_total } }
-  counts: quotes(where:{branch_id:{_eq:$branch}}) { status } }`
-const FOLLOW = `mutation Follow($id: uuid!, $set: quotes_set_input!) { update_quotes_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
-const PRODUCTS = `query QProducts { products(where:{active:{_eq:true}}, order_by:[{category:asc},{name:asc}]) { id sku name category brand price cost } }`
-const CUST = `query QCust($id: uuid!, $examFilter: exams_bool_exp!) { customers_by_pk(id:$id) { id code first_name last_name phone } exams(where:$examFilter, order_by:{exam_date:desc}, limit:1) { id exam_date rx_final recommendation diagnosis } }`
-const DEPOSIT = `mutation Dep($id: uuid!, $p: jsonb!, $s: uuid, $st: uuid) { add_quote_deposit(args:{p_quote_id:$id, p_payments:$p, p_cash_session_id:$s, p_staff_id:$st}) { id number status deposit_total } }`
-export const DELIVER = `mutation Deliver($id: uuid!, $p: jsonb!, $s: uuid, $st: uuid) { deliver_quote(args:{p_quote_id:$id, p_payments:$p, p_cash_session_id:$s, p_staff_id:$st}) { id number total paid } }`
-const INSERT = `mutation NewQuote($o: quotes_insert_input!) { insert_quotes_one(object:$o) { id number } }`
+async function loadQuotes(branch: string, status: string[]) {
+  const [quotes, counts] = await Promise.all([
+    run(sb.from('quotes').select('id,number,status,subtotal,discount,tax,total,deposit_total,approved_at,ready_at,lab_orders(id,number,status,promised_at),valid_until,next_followup_at,last_contact_at,lost_reason,created_at,customer_id,customer:customers(id,first_name,last_name,phone),seller:staff!seller_id(name),exam_id,quote_items(id,description,qty,unit_price,discount_pct,line_total)')
+      .eq('branch_id', branch).in('status', status).order('created_at', { ascending: false }).limit(120)),
+    runAll(() => sb.from('quotes').select('status').eq('branch_id', branch).order('id')),
+  ])
+  return { quotes: quotes as unknown as Quote[], counts: counts as { status: string }[] }
+}
+
+
+const loadProducts = () => runAll(() => sb.from('products').select('id,sku,name,category,brand,price,cost').eq('active', true).order('category').order('name').order('id')).then((products) => ({ products: products as unknown as Product[] }))
+const EXAM_COLS = 'id,exam_date,rx_final,recommendation,diagnosis'
+const lastExam = (customerId: string, examId?: string | null) => {
+  const b = sb.from('exams').select(EXAM_COLS)
+  return run((examId ? b.eq('id', examId) : b.eq('customer_id', customerId)).order('exam_date', { ascending: false }).limit(1))
+}
+
+
+
 
 type Tab = 'activas' | 'seguimiento' | 'ordenes' | 'convertidas' | 'perdidas' | 'todas'
 const TAB_STATUS: Record<Tab, string[]> = { activas: ['abierta', 'seguimiento'], seguimiento: ['seguimiento'], ordenes: ['abonada', 'aprobada', 'lista'], convertidas: ['convertida'], perdidas: ['perdida', 'vencida'], todas: ['abierta', 'seguimiento', 'abonada', 'aprobada', 'lista', 'convertida', 'perdida', 'vencida'] }
@@ -36,12 +48,12 @@ export default function Cotizaciones() {
   const [reason, setReason] = useState('Precio')
   const [followDays, setFollowDays] = useState(3)
   const [toast, setToast] = useState<string | null>(null)
-  const q = useQuery({ queryKey: ['quotes', branch?.id, tab], queryFn: () => gql<{ quotes: Quote[]; counts: { status: string }[] }>(LIST, { branch: branch!.id, status: TAB_STATUS[tab] }), enabled: !!branch })
+  const q = useQuery({ queryKey: ['quotes', branch?.id, tab], queryFn: () => loadQuotes(branch!.id, TAB_STATUS[tab]), enabled: !!branch })
   const counts = useMemo(() => (q.data?.counts ?? []).reduce<Record<string, number>>((a, x) => { a[x.status] = (a[x.status] ?? 0) + 1; return a }, {}), [q.data])
   const list = (q.data?.quotes ?? []).filter((x) => !search || fullName(x.customer).toLowerCase().includes(search.toLowerCase()) || x.number.toLowerCase().includes(search.toLowerCase()))
   const now = Date.now()
-  const doFollow = async () => { const d = new Date(); d.setDate(d.getDate() + followDays); await gql(FOLLOW, { id: follow!.id, set: { status: 'seguimiento', last_contact_at: new Date().toISOString(), next_followup_at: d.toISOString() } }); setFollow(null); setToast('Seguimiento registrado'); void q.refetch() }
-  const doLose = async () => { await gql(FOLLOW, { id: lose!.id, set: { status: 'perdida', lost_reason: reason } }); setLose(null); void q.refetch() }
+  const doFollow = async () => { const d = new Date(); d.setDate(d.getDate() + followDays); await write(() => sb.from('quotes').update({ status: 'seguimiento', last_contact_at: new Date().toISOString(), next_followup_at: d.toISOString() }).eq('id', follow!.id)); setFollow(null); setToast('Seguimiento registrado'); void q.refetch() }
+  const doLose = async () => { await write(() => sb.from('quotes').update({ status: 'perdida', lost_reason: reason }).eq('id', lose!.id)); setLose(null); void q.refetch() }
   const newFor = params.get('new')
 
   return (
@@ -93,11 +105,11 @@ export default function Cotizaciones() {
         suggested={dep ? Math.max(0, Math.round(Number(dep.total) * Number(company?.min_deposit_pct ?? 50)) / 100 - Number(dep.deposit_total ?? 0)) : 0}
         maxAmount={dep ? Number(dep.total) - Number(dep.deposit_total ?? 0) : undefined}
         subtitle={dep && <>Total {money(dep.total)} · ya abonado {money(dep.deposit_total ?? 0)}. Con un anticipo de al menos el <b>{company?.min_deposit_pct ?? 50}%</b> pasa a <b>orden de trabajo</b> y se manda a hacer; por debajo queda en el cajón como “poco abono”. La factura se emite al entregar.</>}
-        onClose={() => setDep(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ add_quote_deposit: { number: string; status: string }[] }>(DEPOSIT, { id: dep!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); const st = r.add_quote_deposit[0]?.status; setDep(null); setToast(st === 'aprobada' ? `${dep!.number}: orden de trabajo aprobada${dep!.lab_orders?.length ? '' : ' (orden de laboratorio generada si lleva cristales)'}` : `${dep!.number}: anticipo registrado · queda en poco abono`); void q.refetch() }} />
+        onClose={() => setDep(null)} onConfirm={async (p: Pay[]) => { const r = await addQuoteDeposit(dep!.id, p, cashSession?.id ?? null, me?.id ?? null); const st = r[0]?.status; setDep(null); setToast(st === 'aprobada' ? `${dep!.number}: orden de trabajo aprobada${dep!.lab_orders?.length ? '' : ' (orden de laboratorio generada si lleva cristales)'}` : `${dep!.number}: anticipo registrado · queda en poco abono`); void q.refetch() }} />
       <PayModal open={!!del} title={`Entregar y facturar · ${del?.number ?? ''}`} currency={currency} confirmLabel="Facturar"
         suggested={del ? Number(del.total) - Number(del.deposit_total ?? 0) : 0} maxAmount={del ? Number(del.total) - Number(del.deposit_total ?? 0) : undefined}
         subtitle={del && <>Se emite la factura por {money(del.total)} aplicando {money(del.deposit_total ?? 0)} de anticipos. Saldo a cobrar: <b>{money(Number(del.total) - Number(del.deposit_total ?? 0))}</b>.{del.lab_orders?.some((o) => o.status !== 'listo' && o.status !== 'entregado') && <span className="block mt-1 text-amber-700">Atención: la orden de laboratorio aún no está lista.</span>}</>}
-        onClose={() => setDel(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ deliver_quote: { number: string }[] }>(DELIVER, { id: del!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); setDel(null); setToast(`Entregado · factura ${r.deliver_quote[0]?.number}`); void q.refetch() }} />
+        onClose={() => setDel(null)} onConfirm={async (p: Pay[]) => { const r = await deliverQuote(del!.id, p, cashSession?.id ?? null, me?.id ?? null); setDel(null); setToast(`Entregado · factura ${r[0]?.number}`); void q.refetch() }} />
       {newFor !== null && <NuevaCotizacion customerId={newFor} examId={params.get('exam')} onClose={() => setParams({})} onCreated={(n) => { setParams({}); setToast(`Cotización ${n} creada`); void q.refetch() }} currency={currency} />}
       <Toast msg={toast} onClose={() => setToast(null)} />
     </div>
@@ -115,9 +127,9 @@ function NuevaCotizacion({ customerId, examId, onClose, onCreated, currency }: {
   const [sellerId, setSellerId] = useState(me?.id ?? '')
   const [notes, setNotes] = useState('')
   const [validDays, setValidDays] = useState(15)
-  const products = useQuery({ queryKey: ['q-products'], queryFn: () => gql<{ products: Product[] }>(PRODUCTS) })
-  const custs = useQuery({ queryKey: ['q-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(`query($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}}]}, limit:8) { id code first_name last_name phone } }`, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
-  useEffect(() => { if (!customerId) return; gql<{ customers_by_pk: Customer; exams: typeof exam[] }>(CUST, { id: customerId, examFilter: examId ? { id: { _eq: examId } } : { customer_id: { _eq: customerId } } }).then((r) => { setCustomer(r.customers_by_pk); setExam(r.exams[0] ?? null) }) }, [customerId, examId])
+  const products = useQuery({ queryKey: ['q-products'], queryFn: loadProducts })
+  const custs = useQuery({ queryKey: ['q-cust', company?.id, custQ], queryFn: () => run(sb.from('customers').select('id,code,first_name,last_name,phone').or(['first_name', 'last_name', 'phone'].map((c) => `${c}.ilike.${likeTerm(custQ)}`).join(',')).limit(8)).then((customers) => ({ customers: customers as unknown as Customer[] })), enabled: !!company && custQ.length >= 2 })
+  useEffect(() => { if (!customerId) return; Promise.all([run(sb.from('customers').select('id,code,first_name,last_name,phone').eq('id', customerId).maybeSingle()), lastExam(customerId, examId)]).then(([c, ex]) => { setCustomer(c as unknown as Customer); setExam(((ex as unknown) as (typeof exam)[])[0] ?? null) }) }, [customerId, examId])
   const filtered = useMemo(() => { const s = search.toLowerCase(); return (products.data?.products ?? []).filter((p) => s && (p.name.toLowerCase().includes(s) || p.sku.toLowerCase().includes(s))).slice(0, 8) }, [products.data, search])
   const subtotal = lines.reduce((a, l) => a + Number(l.product.price) * l.qty * (1 - l.discount_pct / 100), 0)
   const base = Math.max(0, subtotal - discount), tax = Math.round(base * Number(company?.tax_rate ?? 0)) / 100, total = Math.round((base + tax) * 100) / 100
@@ -126,8 +138,9 @@ function NuevaCotizacion({ customerId, examId, onClose, onCreated, currency }: {
     if (!customer || !company || !branch) return
     const valid = new Date(); valid.setDate(valid.getDate() + validDays)
     const number = `${company.invoice_prefix}-COT-${String(Date.now()).slice(-6)}`
-    const r = await gql<{ insert_quotes_one: { number: string } }>(INSERT, { o: { company_id: company.id, branch_id: branch.id, customer_id: customer.id, exam_id: exam?.id ?? null, seller_id: sellerId || null, number, status: 'abierta', subtotal, discount, tax, total, valid_until: valid.toISOString().slice(0, 10), next_followup_at: new Date(Date.now() + 3 * 864e5).toISOString(), notes: notes || null,
-      quote_items: { data: lines.map((l) => ({ product_id: l.product.id, description: l.product.name, qty: l.qty, unit_price: l.product.price, discount_pct: l.discount_pct, line_total: Math.round(Number(l.product.price) * l.qty * (1 - l.discount_pct / 100) * 100) / 100 })) } } })
+    const head = await insertNested('quotes', { company_id: company.id, branch_id: branch.id, customer_id: customer.id, exam_id: exam?.id ?? null, seller_id: sellerId || null, number, status: 'abierta', subtotal, discount, tax, total, valid_until: valid.toISOString().slice(0, 10), next_followup_at: new Date(Date.now() + 3 * 864e5).toISOString(), notes: notes || null },
+      'quote_items', 'quote_id', lines.map((l) => ({ product_id: l.product.id, description: l.product.name, qty: l.qty, unit_price: l.product.price, discount_pct: l.discount_pct, line_total: Math.round(Number(l.product.price) * l.qty * (1 - l.discount_pct / 100) * 100) / 100 })))
+    const r = { insert_quotes_one: head }
     onCreated(r.insert_quotes_one.number)
   }
   return (
@@ -136,7 +149,7 @@ function NuevaCotizacion({ customerId, examId, onClose, onCreated, currency }: {
         <div className="space-y-3">
           <div className="relative"><span className="label">Cliente</span>
             {customer ? <div className="input h-10 flex items-center gap-2"><Avatar name={fullName(customer)} className="h-6 w-6 text-[10px]" /><b className="text-sm">{fullName(customer)}</b><span className="text-xs text-slate-400">{customer.phone}</span><button className="ml-auto text-xs text-slate-400" onClick={() => { setCustomer(null); setExam(null) }}>cambiar</button></div>
-              : <><input className="input h-10" placeholder="Buscar cliente…" value={custQ} onChange={(e) => setCustQ(e.target.value)} autoFocus />{custQ.length >= 2 && <div className="absolute z-20 mt-1 w-full card p-1">{(custs.data?.customers ?? []).map((c) => <button key={c.id} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm" onClick={() => { setCustomer(c); setCustQ(''); gql<{ exams: typeof exam[] }>(`query($id: uuid!){ exams(where:{customer_id:{_eq:$id}}, order_by:{exam_date:desc}, limit:1){ id exam_date rx_final recommendation diagnosis } }`, { id: c.id }).then((r) => setExam(r.exams[0] ?? null)) }}><b>{fullName(c)}</b> <span className="text-xs text-slate-500">{c.phone}</span></button>)}</div>}</>}
+              : <><input className="input h-10" placeholder="Buscar cliente…" value={custQ} onChange={(e) => setCustQ(e.target.value)} autoFocus />{custQ.length >= 2 && <div className="absolute z-20 mt-1 w-full card p-1">{(custs.data?.customers ?? []).map((c) => <button key={c.id} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm" onClick={() => { setCustomer(c); setCustQ(''); lastExam(c.id).then((ex) => setExam(((ex as unknown) as (typeof exam)[])[0] ?? null)) }}><b>{fullName(c)}</b> <span className="text-xs text-slate-500">{c.phone}</span></button>)}</div>}</>}
           </div>
           <div className="relative"><span className="label">Añadir producto</span><input className="input h-10" placeholder="Buscar armazón, lente, tratamiento…" value={search} onChange={(e) => setSearch(e.target.value)} />
             {filtered.length > 0 && <div className="absolute z-20 mt-1 w-full card p-1 max-h-60 overflow-y-auto">{filtered.map((p) => <button key={p.id} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm flex justify-between" onClick={() => { setLines((ls) => [...ls, { product: p, qty: 1, discount_pct: 0 }]); setSearch('') }}><span><b>{p.name}</b> <span className="text-xs text-slate-400">{CATEGORIES[p.category]}</span></span><span className="font-semibold">{money(p.price)}</span></button>)}</div>}

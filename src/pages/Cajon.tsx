@@ -3,17 +3,21 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { HandCoins, PackageCheck, Inbox, FlaskConical } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run } from '../lib/supabase'
+import { addQuoteDeposit, deliverQuote } from '../lib/ops'
 import { Card, PageHeader, Loading, StatusBadge, Avatar, Empty, Toast, KPI, Badge } from '../components/ui'
 import PayModal, { type Pay } from '../components/PayModal'
-import { DELIVER } from './Cotizaciones'
 import { money, fdate, fullName, ago } from '../lib/format'
 
-const Q = `query Cajon($branch: uuid!) {
-  quotes(where:{branch_id:{_eq:$branch}, status:{_in:["abonada","aprobada","lista"]}}, order_by:{created_at:asc}) { id number status total deposit_total approved_at ready_at created_at customer_id customer { first_name last_name phone } seller { name } quote_items { description } lab_orders { number status promised_at } }
-  legacy: lab_orders(where:{branch_id:{_eq:$branch}, status:{_eq:"listo"}, quote_id:{_is_null:true}}, order_by:{received_at:asc}) { id number received_at customer_id customer { first_name last_name phone } sale { number total paid } }
-}`
-const DEPOSIT = `mutation Dep($id: uuid!, $p: jsonb!, $s: uuid, $st: uuid) { add_quote_deposit(args:{p_quote_id:$id, p_payments:$p, p_cash_session_id:$s, p_staff_id:$st}) { id status } }`
+async function loadCajon(branch: string) {
+  const [quotes, legacy] = await Promise.all([
+    run(sb.from('quotes').select('id,number,status,total,deposit_total,approved_at,ready_at,created_at,customer_id,customer:customers(first_name,last_name,phone),seller:staff!seller_id(name),quote_items(description),lab_orders(number,status,promised_at)')
+      .eq('branch_id', branch).in('status', ['abonada', 'aprobada', 'lista']).order('created_at')),
+    run(sb.from('lab_orders').select('id,number,received_at,customer_id,customer:customers(first_name,last_name,phone),sale:sales(number,total,paid)')
+      .eq('branch_id', branch).eq('status', 'listo').is('quote_id', null).order('received_at')),
+  ])
+  return { quotes: quotes as unknown as QW[], legacy: legacy as unknown as Legacy[] }
+}
 type QW = { id: string; number: string; status: string; total: number; deposit_total: number; approved_at?: string | null; ready_at?: string | null; created_at: string; customer_id: string; customer?: { first_name: string; last_name: string; phone?: string | null }; seller?: { name: string } | null; quote_items: { description: string }[]; lab_orders: { number: string; status: string; promised_at?: string | null }[] }
 type Legacy = { id: string; number: string; received_at?: string | null; customer_id: string; customer?: { first_name: string; last_name: string; phone?: string | null }; sale?: { number: string; total: number; paid: number } | null }
 
@@ -22,7 +26,7 @@ export default function Cajon() {
   const [dep, setDep] = useState<QW | null>(null)
   const [del, setDel] = useState<QW | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const q = useQuery({ queryKey: ['cajon', branch?.id], queryFn: () => gql<{ quotes: QW[]; legacy: Legacy[] }>(Q, { branch: branch!.id }), enabled: !!branch, refetchInterval: 60_000 })
+  const q = useQuery({ queryKey: ['cajon', branch?.id], queryFn: () => loadCajon(branch!.id), enabled: !!branch, refetchInterval: 60_000 })
   if (q.isLoading) return <Loading />
   const all = q.data?.quotes ?? [], legacy = q.data?.legacy ?? []
   const minPct = Number(company?.min_deposit_pct ?? 50)
@@ -73,11 +77,11 @@ export default function Cajon() {
       <PayModal open={!!dep} title={`Abono · ${dep?.number ?? ''}`} currency={currency} confirmLabel="Registrar abono"
         suggested={dep ? Math.max(0, Number(dep.total) * minPct / 100 - Number(dep.deposit_total)) : 0} maxAmount={dep ? saldo(dep) : undefined}
         subtitle={dep && <>Total {money(dep.total)} · abonado {money(dep.deposit_total)}. Al llegar al {minPct}% pasa a orden de trabajo.</>}
-        onClose={() => setDep(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ add_quote_deposit: { status: string }[] }>(DEPOSIT, { id: dep!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); setToast(r.add_quote_deposit[0]?.status === 'aprobada' ? `${dep!.number} aprobada: pasa a taller` : 'Abono registrado'); setDep(null); void q.refetch() }} />
+        onClose={() => setDep(null)} onConfirm={async (p: Pay[]) => { const r = await addQuoteDeposit(dep!.id, p, cashSession?.id ?? null, me?.id ?? null); setToast(r[0]?.status === 'aprobada' ? `${dep!.number} aprobada: pasa a taller` : 'Abono registrado'); setDep(null); void q.refetch() }} />
       <PayModal open={!!del} title={`Entregar y facturar · ${del?.number ?? ''}`} currency={currency} confirmLabel="Facturar"
         suggested={del ? saldo(del) : 0} maxAmount={del ? saldo(del) : undefined}
         subtitle={del && <>Factura por {money(del.total)} aplicando {money(del.deposit_total)} de anticipos. Saldo: <b>{money(saldo(del))}</b>.{del.status !== 'lista' && <span className="block mt-1 text-amber-700">El trabajo aún no figura como listo.</span>}</>}
-        onClose={() => setDel(null)} onConfirm={async (p: Pay[]) => { const r = await gql<{ deliver_quote: { number: string }[] }>(DELIVER, { id: del!.id, p, s: cashSession?.id ?? null, st: me?.id ?? null }); setToast(`Entregado · factura ${r.deliver_quote[0]?.number}`); setDel(null); void q.refetch() }} />
+        onClose={() => setDel(null)} onConfirm={async (p: Pay[]) => { const r = await deliverQuote(del!.id, p, cashSession?.id ?? null, me?.id ?? null); setToast(`Entregado · factura ${r[0]?.number}`); setDel(null); void q.refetch() }} />
       <Toast msg={toast} onClose={() => setToast(null)} />
     </div>
   )

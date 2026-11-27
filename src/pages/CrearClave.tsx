@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { nhost } from '../lib/nhost'
+import { sb } from '../lib/supabase'
 import { Spinner } from '../components/ui'
 
-/** Destino del enlace del correo de invitación / restablecimiento: el usuario elige su contraseña. */
+/** Destino del enlace del correo de invitación / restablecimiento: el usuario elige su contraseña.
+ *  supabase-js lee el token del enlace (#access_token…&type=invite|recovery) y abre la sesión. */
 export default function CrearClave({ onDone }: { onDone: () => void }) {
   const [state, setState] = useState<'checking' | 'ready' | 'invalid'>('checking')
   const [p1, setP1] = useState('')
@@ -11,22 +12,21 @@ export default function CrearClave({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search + '&' + window.location.hash.replace(/^#/, ''))
-    const rt = qs.get('refreshToken')
     const linkErr = qs.get('error_description') || qs.get('error')
     if (linkErr) { setErr(linkErr); setState('invalid'); return }
-    if (!rt) { setState(nhost.getUserSession() ? 'ready' : 'invalid'); return }
-    nhost.auth.refreshToken({ refreshToken: rt })
-      .then((r) => { nhost.sessionStorage.set(r.body); window.history.replaceState(null, '', '/?accion=crear-clave'); setState('ready') })
-      .catch(() => setState('invalid'))
+    sb.auth.getSession().then(({ data }) => {
+      if (data.session) { window.history.replaceState(null, '', '/?accion=crear-clave'); setState('ready') } else setState('invalid')
+    })
   }, [])
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setErr(null)
     if (p1.length < 8) { setErr('La contraseña debe tener al menos 8 caracteres'); return }
     if (p1 !== p2) { setErr('Las contraseñas no coinciden'); return }
     setBusy(true)
-    try { await nhost.auth.changeUserPassword({ newPassword: p1 }); window.history.replaceState(null, '', '/'); onDone() }
-    catch (e2) { const x = e2 as { body?: { message?: string }; message?: string }; setErr(x.body?.message || x.message || 'No se pudo guardar la contraseña') }
-    finally { setBusy(false) }
+    const { error } = await sb.auth.updateUser({ password: p1 })
+    setBusy(false)
+    if (error) { setErr(error.message); return }
+    window.history.replaceState(null, '', '/'); onDone()
   }
   return (
     <div className="min-h-full flex items-center justify-center p-6 bg-slate-50">

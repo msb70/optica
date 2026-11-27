@@ -3,34 +3,49 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, Store, Users, Plus, Shield, Link2, Pencil, Trash2, Truck, ListChecks, Mail } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { MODULES, ACCESS_LABEL, type Access } from '../lib/permissions'
-import { gql, nhost, NHOST_SUBDOMAIN, NHOST_REGION } from '../lib/nhost'
+import { sb, run, write } from '../lib/supabase'
+import ApiCredenciales from '../components/ApiCredenciales'
 import { Card, PageHeader, Modal, Field, Tabs, Badge, Toast, Avatar } from '../components/ui'
 import { money, ROLES, fdate } from '../lib/format'
 import type { Company, Branch, Staff } from '../lib/types'
 
-const AUDIT = `query Audit { audit_log(order_by:{created_at:desc}, limit: 40) { id entity entity_id action actor created_at company { code } } }`
-const UP_COMPANY = `mutation UpCo($id: uuid!, $set: companies_set_input!) { update_companies_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
-const IN_COMPANY = `mutation InCo($o: companies_insert_input!) { insert_companies_one(object:$o) { id } }`
-const IN_BRANCH = `mutation InBr($o: branches_insert_input!) { insert_branches_one(object:$o) { id } }`
-const UP_BRANCH = `mutation UpBr($id: uuid!, $set: branches_set_input!) { update_branches_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
-const IN_STAFF = `mutation InSt($o: staff_insert_input!) { insert_staff_one(object:$o) { id } }`
-const UP_STAFF = `mutation UpSt($id: uuid!, $set: staff_set_input!) { update_staff_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
+type Supplier = { id: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean }
+async function loadCatalogs() {
+  const [consult_reasons, suppliers] = await Promise.all([
+    run(sb.from('consult_reasons').select('id,name,sort,active').order('sort').order('name')),
+    run(sb.from('suppliers').select('id,name,origin,contact,phone,email,notes,active').order('name')),
+  ])
+  return { consult_reasons: consult_reasons as { id: string; name: string; sort: number; active: boolean }[], suppliers: suppliers as Supplier[] }
+}
+const loadAudit = (codes: Map<string, string>) => run(sb.from('audit_log').select('id,entity,entity_id,action,actor,created_at,company_id').order('created_at', { ascending: false }).limit(40))
+  .then((rows) => ({ audit_log: (rows as { id: number; entity: string; entity_id: string; action: string; actor?: string; created_at: string; company_id: string }[]).map((r) => ({ ...r, company: { code: codes.get(r.company_id) ?? '' } })) }))
+/** Guarda: actualiza si trae id, si no inserta. */
+const save = (table: string, row: Record<string, unknown>) => {
+  const { id, ...rest } = row
+  return id ? write(() => sb.from(table).update(rest).eq('id', id as string)) : write(() => sb.from(table).insert(rest))
+}
 
-const REASONS_Q = `query R { consult_reasons(order_by:[{sort:asc},{name:asc}]) { id name sort active } suppliers(order_by:{name:asc}) { id name origin contact phone email notes active } }`
-const IN_REASON = `mutation InR($o: consult_reasons_insert_input!) { insert_consult_reasons_one(object:$o) { id } }`
-const UP_REASON = `mutation UpR($id: uuid!, $set: consult_reasons_set_input!) { update_consult_reasons_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
-const DEL_REASON = `mutation DelR($id: uuid!) { delete_consult_reasons_by_pk(id:$id) { id } }`
-const UP_SUPPLIER = `mutation UpS($o: suppliers_insert_input!) { insert_suppliers_one(object:$o, on_conflict:{constraint: suppliers_pkey, update_columns:[name, origin, contact, phone, email, notes, active]}) { id } }`
-const SET_STAFF_BRANCHES = `mutation SB($staff: uuid!, $objs: [staff_branches_insert_input!]!) { delete_staff_branches(where:{staff_id:{_eq:$staff}}) { affected_rows } insert_staff_branches(objects:$objs) { affected_rows } }`
-const SET_ROLE_PERM = `mutation RP($o: role_permissions_insert_input!) { insert_role_permissions_one(object:$o, on_conflict:{constraint: role_permissions_pkey, update_columns:[access]}) { role } }`
+
+
+
+
+
+
+
+
+
+
+
+
+
 const ORIGINS: Record<string, string> = { china: 'China', zona_libre: 'Zona Libre', eeuu: 'Estados Unidos', local: 'Local', otro: 'Otro' }
 const PERMS: Record<string, string[]> = { admin: ['Todo', 'Todas las compañías y sucursales', 'Descuento sin límite', 'Configuración'], gerente: ['Su compañía', 'Cierre de caja', 'Descuentos hasta su límite', 'Reportes', 'Intercompany'], vendedor: ['POS y cotizaciones', 'Clientes', 'Descuentos hasta su límite'], optometrista: ['Exámenes y RX', 'Agenda', 'Clientes'], cajero: ['Caja: apertura, cierre, arqueo', 'Cobros'], almacen: ['Stock, traspasos, conteos', 'Etiquetas'] }
 
 export default function Configuracion() {
   const { companies, branches, staff, rolePermissions } = useApp()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'companias' | 'sucursales' | 'personal' | 'roles' | 'motivos' | 'proveedores' | 'auditoria'>('companias')
-  const cat = useQuery({ queryKey: ['config-cat'], queryFn: () => gql<{ consult_reasons: { id: string; name: string; sort: number; active: boolean }[]; suppliers: { id: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean }[] }>(REASONS_Q), enabled: tab === 'motivos' || tab === 'proveedores' })
+  const [tab, setTab] = useState<'companias' | 'sucursales' | 'personal' | 'roles' | 'motivos' | 'proveedores' | 'auditoria' | 'api'>('companias')
+  const cat = useQuery({ queryKey: ['config-cat'], queryFn: loadCatalogs, enabled: tab === 'motivos' || tab === 'proveedores' })
   const [newReason, setNewReason] = useState('')
   const [supEdit, setSupEdit] = useState<{ id?: string; name: string; origin: string; contact?: string | null; phone?: string | null; email?: string | null; notes?: string | null; active: boolean } | null>(null)
   const [stBranches, setStBranches] = useState<string[]>([])
@@ -39,10 +54,10 @@ export default function Configuracion() {
   const invite = async (x: Staff) => {
     setInviting(x.id)
     try {
-      const tok = nhost.getUserSession()?.accessToken
-      const r = await fetch(`https://${NHOST_SUBDOMAIN}.functions.${NHOST_REGION}.nhost.run/v1/invite`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` }, body: JSON.stringify({ staffId: x.id, redirectTo: `${window.location.origin}/?accion=crear-clave` }) })
-      const b = await r.json().catch(() => ({})) as { error?: string; email?: string }
-      setToast(r.ok ? `Invitación enviada a ${b.email}` : (b.error ?? `No se pudo invitar (${r.status})`))
+      const { data, error } = await sb.functions.invoke<{ email?: string; error?: string }>('invitar', { body: { staffId: x.id, redirectTo: `${window.location.origin}/?accion=crear-clave` } })
+      let msg = data?.error
+      if (error) { const ctx = (error as { context?: Response }).context; msg = ctx ? ((await ctx.json().catch(() => ({}))) as { error?: string }).error : error.message }
+      setToast(!error && data?.email ? `Invitación enviada a ${data.email}` : (msg ?? 'No se pudo enviar la invitación'))
       void qc.invalidateQueries({ queryKey: ['org'] })
     } catch { setToast('No se pudo contactar con el servicio de invitaciones') } finally { setInviting(null) }
   }
@@ -52,16 +67,16 @@ export default function Configuracion() {
   const [coEdit, setCoEdit] = useState<Partial<Company> | null>(null)
   const [brEdit, setBrEdit] = useState<Partial<Branch> | null>(null)
   const [stEdit, setStEdit] = useState<Partial<Staff> | null>(null)
-  const audit = useQuery({ queryKey: ['audit'], queryFn: () => gql<{ audit_log: { id: number; entity: string; entity_id: string; action: string; actor?: string; created_at: string; company?: { code: string } }[] }>(AUDIT), enabled: tab === 'auditoria' })
+  const audit = useQuery({ queryKey: ['audit'], queryFn: () => loadAudit(new Map(companies.map((c) => [c.id, c.code]))), enabled: tab === 'auditoria' })
   const done = (m: string) => { setToast(m); void qc.invalidateQueries({ queryKey: ['org'] }); setCoEdit(null); setBrEdit(null); setStEdit(null) }
-  const saveCo = async () => { const { id, ...rest } = coEdit!; if (id) await gql(UP_COMPANY, { id, set: rest }); else await gql(IN_COMPANY, { o: { ...rest, invoice_prefix: rest.invoice_prefix ?? rest.code } }); done('Compañía guardada') }
-  const saveBr = async () => { const { id, ...rest } = brEdit!; if (id) await gql(UP_BRANCH, { id, set: rest }); else await gql(IN_BRANCH, { o: rest }); done('Sucursal guardada') }
+  const saveCo = async () => { const c = coEdit!; await save('companies', c.id ? c : { ...c, invoice_prefix: c.invoice_prefix ?? c.code }); done('Compañía guardada') }
+  const saveBr = async () => { await save('branches', brEdit!); done('Sucursal guardada') }
   const saveSt = async () => {
     const { id, staff_branches: _sb, all_branches: _ab, permissions: _pm, ...rest } = stEdit!
     let sid = id
-    if (id) await gql(UP_STAFF, { id, set: { ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms } })
-    else { const r = await gql<{ insert_staff_one: { id: string } }>(IN_STAFF, { o: { ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms } }); sid = r.insert_staff_one.id }
-    if (sid) await gql(SET_STAFF_BRANCHES, { staff: sid, objs: stAll ? [] : stBranches.map((b) => ({ staff_id: sid, branch_id: b })) })
+    if (id) await write(() => sb.from('staff').update({ ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms }).eq('id', id))
+    else { const r = (await write(() => sb.from('staff').insert({ ...rest, branch_id: stBranches[0] ?? null, all_branches: stAll, permissions: stPerms }).select('id').single())) as unknown as { id: string }; sid = r.id }
+    if (sid) { const staffId = sid; await write(() => sb.from('staff_branches').delete().eq('staff_id', staffId)); if (!stAll && stBranches.length) await write(() => sb.from('staff_branches').insert(stBranches.map((b) => ({ staff_id: staffId, branch_id: b })))) }
     done('Usuario guardado')
   }
   const openSt = (x: Partial<Staff>) => { setStEdit(x); setStAll(!!x.all_branches || x.role === 'admin'); setStPerms((x.permissions as Record<string, Access> | null) ?? null); setStBranches(x.staff_branches?.map((b) => b.branch_id) ?? (x.branch_id ? [x.branch_id] : [])) }
@@ -69,7 +84,7 @@ export default function Configuracion() {
   return (
     <div className="space-y-4">
       <PageHeader title="Configuración" subtitle="Grupo → compañías legales → sucursales · usuarios y permisos por rol + compañía + sucursal · Zoho org_id por compañía" />
-      <Tabs value={tab} onChange={setTab} items={[{ value: 'companias', label: 'Compañías', count: companies.length }, { value: 'sucursales', label: 'Sucursales', count: branches.length }, { value: 'personal', label: 'Personal', count: staff.length }, { value: 'roles', label: 'Roles y permisos' }, { value: 'motivos', label: 'Motivos de consulta' }, { value: 'proveedores', label: 'Proveedores' }, { value: 'auditoria', label: 'Auditoría' }]} />
+      <Tabs value={tab} onChange={setTab} items={[{ value: 'companias', label: 'Compañías', count: companies.length }, { value: 'sucursales', label: 'Sucursales', count: branches.length }, { value: 'personal', label: 'Personal', count: staff.length }, { value: 'roles', label: 'Roles y permisos' }, { value: 'motivos', label: 'Motivos de consulta' }, { value: 'proveedores', label: 'Proveedores' }, { value: 'auditoria', label: 'Auditoría' }, { value: 'api', label: 'API' }]} />
 
       {tab === 'companias' && <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {companies.map((c) => <Card key={c.id} title={<span className="flex items-center gap-2"><Building2 size={16} className="text-brand-600" />{c.legal_name}</span>} subtitle={`${c.code} · ${c.tax_id ?? 'sin RUC'}`} actions={<button className="btn-ghost h-7 text-xs" onClick={() => setCoEdit(c)}><Pencil size={12} />Editar</button>}>
@@ -94,14 +109,14 @@ export default function Configuracion() {
 
       {tab === 'roles' && <Card padded={false} title={<span className="flex items-center gap-2"><Shield size={15} className="text-brand-600" />Permisos por módulo y rol</span>} subtitle="Sin acceso: el módulo no aparece · Solo ver: consulta sin guardar cambios · Editar: acceso completo. Se puede personalizar por usuario en Personal.">
         <div className="overflow-x-auto"><table className="table text-xs"><thead><tr><th>Módulo</th>{Object.keys(ROLES).map((r) => <th key={r} className="text-center">{ROLES[r]}</th>)}</tr></thead><tbody>
-          {MODULES.map((m) => <tr key={m.key}><td className="font-semibold">{m.label}</td>{Object.keys(ROLES).map((r) => <td key={r} className="text-center">{r === 'admin' ? <Badge tone="green">Editar</Badge> : <select className={`input h-8 text-xs ${roleAccess(r, m.key) === 'editar' ? 'text-emerald-700' : roleAccess(r, m.key) === 'ver' ? 'text-blue-700' : 'text-slate-400'}`} value={roleAccess(r, m.key)} onChange={async (e) => { await gql(SET_ROLE_PERM, { o: { role: r, module: m.key, access: e.target.value } }); void qc.invalidateQueries({ queryKey: ['org'] }) }}>{(['ninguno', 'ver', 'editar'] as Access[]).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}</select>}</td>)}</tr>)}
+          {MODULES.map((m) => <tr key={m.key}><td className="font-semibold">{m.label}</td>{Object.keys(ROLES).map((r) => <td key={r} className="text-center">{r === 'admin' ? <Badge tone="green">Editar</Badge> : <select className={`input h-8 text-xs ${roleAccess(r, m.key) === 'editar' ? 'text-emerald-700' : roleAccess(r, m.key) === 'ver' ? 'text-blue-700' : 'text-slate-400'}`} value={roleAccess(r, m.key)} onChange={async (e) => { await write(() => sb.from('role_permissions').upsert({ role: r, module: m.key, access: e.target.value }, { onConflict: 'role,module' })); void qc.invalidateQueries({ queryKey: ['org'] }) }}>{(['ninguno', 'ver', 'editar'] as Access[]).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}</select>}</td>)}</tr>)}
         </tbody></table></div>
         <div className="px-5 py-3 text-[11px] text-slate-500 border-t border-slate-100">Además: {Object.entries(PERMS).map(([r, p]) => `${ROLES[r]} — ${p.join(', ')}`).join(' · ')}</div>
       </Card>}
 
       {tab === 'motivos' && <Card title={<span className="flex items-center gap-2"><ListChecks size={15} className="text-brand-600" />Motivos de consulta</span>} subtitle="Aparecen como sugerencias al crear un examen">
-        <div className="flex gap-2 mb-3"><input className="input h-9" placeholder="Nuevo motivo…" value={newReason} onChange={(e) => setNewReason(e.target.value)} /><button className="btn-primary h-9" disabled={!newReason.trim()} onClick={async () => { await gql(IN_REASON, { o: { name: newReason.trim(), sort: (cat.data?.consult_reasons.length ?? 0) + 1 } }); setNewReason(''); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }}><Plus size={14} />Añadir</button></div>
-        <ul className="divide-y divide-slate-100">{(cat.data?.consult_reasons ?? []).map((r) => <li key={r.id} className="flex items-center gap-3 py-2 text-sm"><span className={r.active ? 'font-medium' : 'text-slate-400 line-through'}>{r.name}</span><label className="ml-auto flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={r.active} onChange={async (e) => { await gql(UP_REASON, { id: r.id, set: { active: e.target.checked } }); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }} />activo</label><button className="btn-ghost h-7 w-7 p-0 text-slate-400 hover:text-rose-600" onClick={async () => { await gql(DEL_REASON, { id: r.id }); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }}><Trash2 size={13} /></button></li>)}</ul>
+        <div className="flex gap-2 mb-3"><input className="input h-9" placeholder="Nuevo motivo…" value={newReason} onChange={(e) => setNewReason(e.target.value)} /><button className="btn-primary h-9" disabled={!newReason.trim()} onClick={async () => { await write(() => sb.from('consult_reasons').insert({ name: newReason.trim(), sort: (cat.data?.consult_reasons.length ?? 0) + 1 })); setNewReason(''); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }}><Plus size={14} />Añadir</button></div>
+        <ul className="divide-y divide-slate-100">{(cat.data?.consult_reasons ?? []).map((r) => <li key={r.id} className="flex items-center gap-3 py-2 text-sm"><span className={r.active ? 'font-medium' : 'text-slate-400 line-through'}>{r.name}</span><label className="ml-auto flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={r.active} onChange={async (e) => { await write(() => sb.from('consult_reasons').update({ active: e.target.checked }).eq('id', r.id)); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }} />activo</label><button className="btn-ghost h-7 w-7 p-0 text-slate-400 hover:text-rose-600" onClick={async () => { await write(() => sb.from('consult_reasons').delete().eq('id', r.id)); void cat.refetch(); void qc.invalidateQueries({ queryKey: ['consult-reasons'] }) }}><Trash2 size={13} /></button></li>)}</ul>
       </Card>}
 
       {tab === 'proveedores' && <Card padded={false} title={<span className="flex items-center gap-2"><Truck size={15} className="text-brand-600" />Proveedores</span>} subtitle="China, Zona Libre, Estados Unidos… la referencia del proveedor se guarda en cada producto" actions={<button className="btn-primary h-8 text-xs" onClick={() => setSupEdit({ name: '', origin: 'zona_libre', active: true })}><Plus size={13} />Nuevo proveedor</button>}>
@@ -110,7 +125,7 @@ export default function Configuracion() {
           {(cat.data?.suppliers ?? []).length === 0 && <tr><td colSpan={7} className="text-center text-xs text-slate-400 py-6">Sin proveedores. Créalos aquí o se crean solos al importar inventario.</td></tr>}
         </tbody></table>
       </Card>}
-      <Modal open={!!supEdit} onClose={() => setSupEdit(null)} title={supEdit?.id ? 'Editar proveedor' : 'Nuevo proveedor'} size="md" footer={<><button className="btn-secondary" onClick={() => setSupEdit(null)}>Cancelar</button><button className="btn-primary" disabled={!supEdit?.name} onClick={async () => { await gql(UP_SUPPLIER, { o: supEdit }); setSupEdit(null); setToast('Proveedor guardado'); void cat.refetch() }}>Guardar</button></>}>
+      <Modal open={!!supEdit} onClose={() => setSupEdit(null)} title={supEdit?.id ? 'Editar proveedor' : 'Nuevo proveedor'} size="md" footer={<><button className="btn-secondary" onClick={() => setSupEdit(null)}>Cancelar</button><button className="btn-primary" disabled={!supEdit?.name} onClick={async () => { await save('suppliers', supEdit as Record<string, unknown>); setSupEdit(null); setToast('Proveedor guardado'); void cat.refetch() }}>Guardar</button></>}>
         {supEdit && <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Nombre"><input className="input" value={supEdit.name} onChange={(e) => setSupEdit({ ...supEdit, name: e.target.value })} /></Field>
           <Field label="Origen"><select className="input" value={supEdit.origin} onChange={(e) => setSupEdit({ ...supEdit, origin: e.target.value })}>{Object.entries(ORIGINS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
@@ -122,6 +137,7 @@ export default function Configuracion() {
         </div>}
       </Modal>
 
+      {tab === 'api' && <ApiCredenciales />}
       {tab === 'auditoria' && <Card padded={false} title="Auditoría clínica y financiera" subtitle="Ventas, exámenes, cajas, pagos e intercompany (trigger audit_trg)"><table className="table"><thead><tr><th>Fecha</th><th>Compañía</th><th>Entidad</th><th>Acción</th><th>Actor</th><th>ID</th></tr></thead><tbody>{(audit.data?.audit_log ?? []).map((a) => <tr key={a.id}><td className="text-xs text-slate-500">{new Date(a.created_at).toLocaleString('es-PA')}</td><td className="text-xs">{a.company?.code}</td><td className="font-semibold text-sm">{a.entity}</td><td><Badge tone={a.action === 'insert' ? 'green' : a.action === 'delete' ? 'rose' : 'blue'}>{a.action}</Badge></td><td className="text-xs">{a.actor ?? 'sistema'}</td><td className="font-mono text-[10px] text-slate-400">{a.entity_id}</td></tr>)}</tbody></table></Card>}
 
       <Modal open={!!coEdit} onClose={() => setCoEdit(null)} title={coEdit?.id ? 'Editar compañía' : 'Nueva compañía legal'} size="md" footer={<><button className="btn-secondary" onClick={() => setCoEdit(null)}>Cancelar</button><button className="btn-primary" onClick={saveCo} disabled={!coEdit?.code || !coEdit?.legal_name}>Guardar</button></>}>

@@ -28,3 +28,6 @@ BEGIN
   END LOOP;
 END $$;
 SET session_replication_role = origin;
+-- ningún cliente dado de alta en el futuro ni después de su primera compra
+UPDATE public.customers c SET created_at = least(c.created_at, coalesce((SELECT min(s.sale_date) FROM public.sales s WHERE s.customer_id = c.id), now()) - interval '1 day')
+WHERE c.created_at > now() - interval '1 day' OR c.created_at > (SELECT min(s.sale_date) FROM public.sales s WHERE s.customer_id = c.id);

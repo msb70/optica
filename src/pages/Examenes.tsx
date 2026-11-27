@@ -4,18 +4,23 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { Plus, Search, ArrowRight, Copy, Printer, FileText } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, write, likeTerm } from '../lib/supabase'
 import { Card, PageHeader, Loading, Badge, Avatar, Field, Empty, Toast } from '../components/ui'
 import RxTable from '../components/RxTable'
 import { fdate, fullName } from '../lib/format'
 import type { Exam, Rx, Eye, Customer } from '../lib/types'
 
-const LIST = `query Exams($branch: uuid!, $q: String!) { exams(where:{branch_id:{_eq:$branch}, customer:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{code:{_ilike:$q}}]}}, order_by:{exam_date:desc}, limit: 80) { id exam_date template reason rx_final diagnosis recommendation next_review_date status customer_id customer { id first_name last_name code birth_date } optometrist { name } } }`
+const CUST_COLS = 'id,code,first_name,last_name,phone,birth_date,tags'
+const custOr = (t: string, cols: string[]) => cols.map((c) => `${c}.ilike.${t}`).join(',')
+const loadExams = (branch: string, search: string) => run(sb.from('exams')
+  .select('id,exam_date,template,reason,rx_final,diagnosis,recommendation,next_review_date,status,customer_id,customer:customers!inner(id,first_name,last_name,code,birth_date),optometrist:staff!optometrist_id(name)')
+  .eq('branch_id', branch).or(custOr(likeTerm(search), ['first_name', 'last_name', 'code']), { referencedTable: 'customer' })
+  .order('exam_date', { ascending: false }).limit(80)).then((exams) => ({ exams: exams as unknown as Exam[] }))
 
 export default function Examenes() {
   const { branch } = useApp()
   const [search, setSearch] = useState('')
-  const q = useQuery({ queryKey: ['exams', branch?.id, search], queryFn: () => gql<{ exams: Exam[] }>(LIST, { branch: branch!.id, q: `%${search}%` }), enabled: !!branch })
+  const q = useQuery({ queryKey: ['exams', branch?.id, search], queryFn: () => loadExams(branch!.id, search), enabled: !!branch })
   const today = new Date().toISOString().slice(0, 10)
   return (
     <div className="space-y-4">
@@ -50,9 +55,16 @@ export default function Examenes() {
 }
 
 // ---------------------------------------------------------------------
-const CUST_Q = `query ExamCust($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}}]}, limit: 8) { id code first_name last_name phone birth_date tags } }`
-const CUST_ONE = `query ExamCustOne($id: uuid!) { customers_by_pk(id:$id) { id code first_name last_name phone birth_date tags } exams(where:{customer_id:{_eq:$id}}, order_by:{exam_date:desc}, limit:1) { rx_final autorefraction } }`
-const INSERT = `mutation NewExam($o: exams_insert_input!, $appt: appointments_bool_exp!) { insert_exams_one(object:$o) { id rx_final_transposed next_review_date } update_appointments(where:$appt, _set:{status:"atendida"}) { affected_rows } }`
+const searchCustomers = (q: string) => run(sb.from('customers').select(CUST_COLS).or(custOr(likeTerm(q), ['first_name', 'last_name', 'phone', 'code'])).limit(8))
+  .then((customers) => ({ customers: customers as unknown as Customer[] }))
+async function loadCustomerForExam(id: string) {
+  const [c, exams] = await Promise.all([
+    run(sb.from('customers').select(CUST_COLS).eq('id', id).maybeSingle()),
+    run(sb.from('exams').select('rx_final,autorefraction').eq('customer_id', id).order('exam_date', { ascending: false }).limit(1)),
+  ])
+  return { customers_by_pk: c as unknown as Customer, exams: exams as unknown as { rx_final: Rx; autorefraction: Rx }[] }
+}
+
 
 const emptyEye = (): Eye => ({ sph: 0, cyl: 0, axis: 0, add: 0, va: '20/20' })
 const emptyRx = (): Rx => ({ od: emptyEye(), oi: emptyEye(), pd: 62 })
@@ -91,7 +103,7 @@ function RxEditor({ title, rx, onChange, kid, actions }: { title: string; rx: Rx
 }
 
 export function ExamenNuevo() {
-  const reasonsQ = useQuery({ queryKey: ['consult-reasons'], queryFn: () => gql<{ consult_reasons: { id: string; name: string }[] }>(`query Reasons { consult_reasons(where:{active:{_eq:true}}, order_by:[{sort:asc},{name:asc}]) { id name } }`), staleTime: 300_000 })
+  const reasonsQ = useQuery({ queryKey: ['consult-reasons'], queryFn: () => run(sb.from('consult_reasons').select('id,name').eq('active', true).order('sort').order('name')).then((consult_reasons) => ({ consult_reasons: consult_reasons as { id: string; name: string }[] })), staleTime: 300_000 })
   const { company, branch, staff, me } = useApp()
   const nav = useNavigate()
   const [params] = useSearchParams()
@@ -109,16 +121,19 @@ export function ExamenNuevo() {
   const [prev, setPrev] = useState<Rx | null>(null)
   const [saved, setSaved] = useState<{ id: string; rx_final_transposed: Rx } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const custs = useQuery({ queryKey: ['exam-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUST_Q, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
+  const custs = useQuery({ queryKey: ['exam-cust', company?.id, custQ], queryFn: () => searchCustomers(custQ), enabled: !!company && custQ.length >= 2 })
 
   useEffect(() => {
     const id = params.get('customer'); if (!id) return
-    gql<{ customers_by_pk: Customer; exams: { rx_final: Rx; autorefraction: Rx }[] }>(CUST_ONE, { id }).then((r) => { setCustomer(r.customers_by_pk); if (r.exams[0]) setPrev(r.exams[0].rx_final); if (r.customers_by_pk?.tags?.includes('niño')) setTemplate('nino') })
+    loadCustomerForExam(id).then((r) => { setCustomer(r.customers_by_pk); if (r.exams[0]) setPrev(r.exams[0].rx_final); if (r.customers_by_pk?.tags?.includes('niño')) setTemplate('nino') })
   }, [params])
 
   const save = async () => {
     if (!customer || !company || !branch) return
-    const r = await gql<{ insert_exams_one: { id: string; rx_final_transposed: Rx } }>(INSERT, { o: { company_id: company.id, branch_id: branch.id, customer_id: customer.id, optometrist_id: opto || null, appointment_id: params.get('appointment') || null, template, reason, autorefraction: auto, rx_initial: ini, rx_final: fin, diagnosis: dx || null, recommendation: rec || null, next_review_date: next || null, status: 'completado' }, appt: params.get('appointment') ? { id: { _eq: params.get('appointment') } } : { id: { _is_null: true } } })
+    const apptId = params.get('appointment')
+    const ex = await write(() => sb.from('exams').insert({ company_id: company.id, branch_id: branch.id, customer_id: customer.id, optometrist_id: opto || null, appointment_id: apptId || null, template, reason, autorefraction: auto, rx_initial: ini, rx_final: fin, diagnosis: dx || null, recommendation: rec || null, next_review_date: next || null, status: 'completado' }).select('id,rx_final_transposed,next_review_date').single())
+    if (apptId) await write(() => sb.from('appointments').update({ status: 'atendida' }).eq('id', apptId))
+    const r = { insert_exams_one: ex as unknown as { id: string; rx_final_transposed: Rx } }
     setSaved(r.insert_exams_one); setToast('Examen guardado')
   }
 

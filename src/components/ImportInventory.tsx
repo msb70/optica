@@ -1,16 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Upload, Download, AlertTriangle } from 'lucide-react'
 import { Modal, Field, Badge } from './ui'
-import { gql } from '../lib/nhost'
+import { sb, run as exec, write } from '../lib/supabase'
 import { money, CATEGORIES } from '../lib/format'
 
 const COLS = ['sku', 'nombre', 'categoria', 'marca', 'modelo', 'color', 'costo', 'precio', 'cantidad', 'proveedor', 'origen', 'ref_proveedor', 'codigo_barras', 'stock_minimo']
 const CAT_ALIAS: Record<string, string> = { armazon: 'armazon', 'armazón': 'armazon', aro: 'armazon', montura: 'armazon', lente: 'lente', cristal: 'lente', lente_contacto: 'lente_contacto', 'lentes de contacto': 'lente_contacto', contacto: 'lente_contacto', solar: 'solar', solares: 'solar', accesorio: 'accesorio', accesorios: 'accesorio', servicio: 'servicio' }
 const ORIGIN_ALIAS: Record<string, string> = { china: 'china', 'zona libre': 'zona_libre', zona_libre: 'zona_libre', zl: 'zona_libre', eeuu: 'eeuu', usa: 'eeuu', 'estados unidos': 'eeuu', local: 'local' }
-const EXISTING = `query Ex($skus: [String!]!) { products(where:{sku:{_in:$skus}}) { id sku } suppliers { id name } }`
-const UPSERT = `mutation Up($objs: [products_insert_input!]!) { insert_products(objects:$objs, on_conflict:{constraint: products_sku_key, update_columns:[name, category, brand, model, color, cost, price, supplier_id, supplier_ref, barcode, min_stock, track_stock]}) { returning { id sku } } }`
-const SUP = `mutation S($objs: [suppliers_insert_input!]!) { insert_suppliers(objects:$objs) { returning { id name } } }`
-const MOVES = `mutation M($objs: [stock_movements_insert_input!]!) { insert_stock_movements(objects:$objs) { affected_rows } }`
+const UPSERT_COLS = 'id,sku'
 
 type Row = { sku: string; nombre: string; categoria: string; marca: string; modelo: string; color: string; costo: number; precio: number; cantidad: number; proveedor: string; origen: string; ref_proveedor: string; codigo_barras: string; stock_minimo: number; error?: string }
 
@@ -43,15 +40,19 @@ export default function ImportInventory({ open, onClose, onDone, branchId, branc
   const run = async () => {
     setBusy(true); setErr(null)
     try {
-      const ex = await gql<{ products: { id: string; sku: string }[]; suppliers: { id: string; name: string }[] }>(EXISTING, { skus: ok.map((r) => r.sku) })
-      const supMap = new Map(ex.suppliers.map((s) => [s.name.toLowerCase(), s.id]))
+      const [exProducts, suppliers] = await Promise.all([
+        exec(sb.from('products').select('id,sku').in('sku', ok.map((r) => r.sku))),
+        exec(sb.from('suppliers').select('id,name')),
+      ])
+      const ex = { products: exProducts as { id: string; sku: string }[] }
+      const supMap = new Map((suppliers as { id: string; name: string }[]).map((s) => [s.name.toLowerCase(), s.id]))
       const newSup = [...new Map(ok.filter((r) => r.proveedor && !supMap.has(r.proveedor.toLowerCase())).map((r) => [r.proveedor.toLowerCase(), { name: r.proveedor, origin: r.origen }])).values()]
-      if (newSup.length) (await gql<{ insert_suppliers: { returning: { id: string; name: string }[] } }>(SUP, { objs: newSup })).insert_suppliers.returning.forEach((s) => supMap.set(s.name.toLowerCase(), s.id))
-      const objs = ok.map((r) => ({ sku: r.sku, name: r.nombre, category: r.categoria, brand: r.marca || null, model: r.modelo || null, color: r.color || null, cost: r.costo, price: r.precio, supplier_id: r.proveedor ? supMap.get(r.proveedor.toLowerCase()) : null, supplier_ref: r.ref_proveedor || null, barcode: r.codigo_barras || null, min_stock: r.stock_minimo, track_stock: !['lente', 'servicio'].includes(r.categoria) }))
-      const up = await gql<{ insert_products: { returning: { id: string; sku: string }[] } }>(UPSERT, { objs })
-      const ids = new Map(up.insert_products.returning.map((p) => [p.sku, p.id]))
+      if (newSup.length) ((await write(() => sb.from('suppliers').insert(newSup).select('id,name'))) as { id: string; name: string }[]).forEach((s) => supMap.set(s.name.toLowerCase(), s.id))
+      const objs = ok.map((r) => ({ sku: r.sku, name: r.nombre, category: r.categoria, brand: r.marca || null, model: r.modelo || null, color: r.color || null, cost: r.costo, price: r.precio, supplier_id: r.proveedor ? supMap.get(r.proveedor.toLowerCase()) ?? null : null, supplier_ref: r.ref_proveedor || null, barcode: r.codigo_barras || null, min_stock: r.stock_minimo, track_stock: !['lente', 'servicio'].includes(r.categoria) }))
+      const up = (await write(() => sb.from('products').upsert(objs, { onConflict: 'sku' }).select(UPSERT_COLS))) as { id: string; sku: string }[]
+      const ids = new Map(up.map((p) => [p.sku, p.id]))
       const moves = ok.filter((r) => r.cantidad !== 0 && !['lente', 'servicio'].includes(r.categoria)).map((r) => ({ product_id: ids.get(r.sku), branch_id: branchId, qty: r.cantidad, type: kind, note: kind === 'compra' ? 'Importación de mercancía' : 'Carga inicial de inventario', staff_id: staffId }))
-      if (moves.length) await gql(MOVES, { objs: moves })
+      if (moves.length) await write(() => sb.from('stock_movements').insert(moves))
       const created = ok.length - ex.products.length
       onDone(`${ok.length} artículos importados (${created} nuevos, ${ex.products.length} actualizados) · ${moves.reduce((a, m) => a + m.qty, 0)} unidades a ${branchName}${newSup.length ? ` · ${newSup.length} proveedores nuevos` : ''}`)
       setText('')

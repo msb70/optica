@@ -3,20 +3,29 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Search, ArrowLeftRight, ClipboardList, Tag, Send, PackageCheck, Plus, Trash2, AlertTriangle, Printer, Upload } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll, write } from '../lib/supabase'
+import { createTransfer, transferReceive, transferSend } from '../lib/ops'
 import { Card, PageHeader, Loading, StatusBadge, Modal, Field, Tabs, Badge, Empty, Toast, KPI } from '../components/ui'
 import { money, fdate, CATEGORIES, num } from '../lib/format'
 import type { Product, Transfer } from '../lib/types'
 import ImportInventory from '../components/ImportInventory'
 
-const STOCK_Q = `query Stock($branch: uuid!) { products(where:{active:{_eq:true}, track_stock:{_eq:true}}, order_by:[{category:asc},{name:asc}]) { id sku barcode name category brand model color cost price min_stock track_stock active stock(where:{branch_id:{_eq:$branch}}) { qty last_count_at } }
-  moves: stock_movements(where:{branch_id:{_eq:$branch}}, order_by:{created_at:desc}, limit: 40) { id qty type note created_at product { name sku } staff { name } } }`
-const TRANSFERS_Q = `query Transfers($branch: uuid!) { transfers(where:{_or:[{from_branch_id:{_eq:$branch}},{to_branch_id:{_eq:$branch}}]}, order_by:{created_at:desc}, limit:50) { id number status intercompany intercompany_doc_id note created_at sent_at received_at from_branch_id to_branch_id from_branch { name company { code } } to_branch { name company { code } } requester { name } transfer_items { id qty unit_cost product { name sku } } } }`
-const NEW_TRANSFER = `mutation NewTransfer($o: transfers_insert_input!) { insert_transfers_one(object:$o) { id number } }`
-const SEND = `mutation Send($id: uuid!, $staff: uuid) { transfer_send(args:{p_transfer_id:$id, p_staff_id:$staff}) { id status intercompany intercompany_doc_id } }`
-const RECEIVE = `mutation Receive($id: uuid!, $staff: uuid) { transfer_receive(args:{p_transfer_id:$id, p_staff_id:$staff}) { id status } }`
-const ADJUST = `mutation Adjust($o: stock_movements_insert_input!) { insert_stock_movements_one(object:$o) { id } }`
-const COUNT = `mutation Count($objs: [stock_movements_insert_input!]!) { insert_stock_movements(objects:$objs) { affected_rows } }`
+async function loadStock(branch: string) {
+  const [products, moves] = await Promise.all([
+    runAll(() => sb.from('products').select('id,sku,barcode,name,category,brand,model,color,cost,price,min_stock,track_stock,active,stock(qty,reserved,last_count_at)').eq('active', true).eq('track_stock', true).eq('stock.branch_id', branch).order('category').order('name').order('id')),
+    run(sb.from('stock_movements').select('id,qty,type,note,created_at,product:products(name,sku),staff:staff(name)').eq('branch_id', branch).order('created_at', { ascending: false }).limit(40)),
+  ])
+  return { products: products as unknown as P[], moves: moves as unknown as { id: string; qty: number; type: string; note?: string; created_at: string; product: { name: string; sku: string }; staff?: { name: string } }[] }
+}
+
+const loadTransfers = (branch: string) => run(sb.from('transfers')
+  .select('id,number,status,intercompany,intercompany_doc_id,note,created_at,sent_at,received_at,from_branch_id,to_branch_id,from_branch:branches!from_branch_id(name,company:companies(code)),to_branch:branches!to_branch_id(name,company:companies(code)),requester:staff!requested_by(name),transfer_items(id,qty,unit_cost,product:products(name,sku))')
+  .or(`from_branch_id.eq.${branch},to_branch_id.eq.${branch}`).order('created_at', { ascending: false }).limit(50)).then((transfers) => ({ transfers: transfers as unknown as T[] }))
+
+
+
+
+
 
 type P = Product & { stock: { qty: number; last_count_at?: string | null }[] }
 type T = Transfer & { from_branch?: { name: string; company: { code: string } }; to_branch?: { name: string; company: { code: string } }; requester?: { name: string } }
@@ -34,19 +43,19 @@ export default function Stock() {
   const [imp, setImp] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [count, setCount] = useState<Record<string, number>>({})
-  const q = useQuery({ queryKey: ['stock', branch?.id], queryFn: () => gql<{ products: P[]; moves: { id: string; qty: number; type: string; note?: string; created_at: string; product: { name: string; sku: string }; staff?: { name: string } }[] }>(STOCK_Q, { branch: branch!.id }), enabled: !!branch })
-  const t = useQuery({ queryKey: ['transfers', branch?.id], queryFn: () => gql<{ transfers: T[] }>(TRANSFERS_Q, { branch: branch!.id }), enabled: !!branch && tab === 'traspasos' })
+  const q = useQuery({ queryKey: ['stock', branch?.id], queryFn: () => loadStock(branch!.id), enabled: !!branch })
+  const t = useQuery({ queryKey: ['transfers', branch?.id], queryFn: () => loadTransfers(branch!.id), enabled: !!branch && tab === 'traspasos' })
   const products = q.data?.products ?? []
   const rows = useMemo(() => products.map((p) => ({ ...p, qty: p.stock[0]?.qty ?? 0 })).filter((p) => (!onlyLow || p.qty <= p.min_stock) && (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))), [products, search, onlyLow])
   const totals = useMemo(() => ({ units: products.reduce((a, p) => a + (p.stock[0]?.qty ?? 0), 0), value: products.reduce((a, p) => a + (p.stock[0]?.qty ?? 0) * Number(p.cost), 0), retail: products.reduce((a, p) => a + (p.stock[0]?.qty ?? 0) * Number(p.price), 0), low: products.filter((p) => (p.stock[0]?.qty ?? 0) <= p.min_stock).length, out: products.filter((p) => (p.stock[0]?.qty ?? 0) === 0).length }), [products])
   const refresh = () => { void q.refetch(); void t.refetch(); void qc.invalidateQueries({ queryKey: ['alerts'] }); void qc.invalidateQueries({ queryKey: ['pos-products'] }) }
 
-  const doAdjust = async () => { await gql(ADJUST, { o: { product_id: adjust!.id, branch_id: branch!.id, qty: adj.qty, type: 'ajuste', note: adj.note || 'Ajuste manual', staff_id: me?.id ?? null } }); setAdjust(null); setAdj({ qty: 0, note: '' }); setToast('Ajuste registrado'); refresh() }
-  const doSend = async (id: string) => { const r = await gql<{ transfer_send: { intercompany: boolean }[] }>(SEND, { id, staff: me?.id ?? null }); setToast(r.transfer_send[0].intercompany ? 'Traspaso enviado · documento intercompany generado automáticamente' : 'Traspaso enviado · stock descontado'); refresh() }
-  const doReceive = async (id: string) => { await gql(RECEIVE, { id, staff: me?.id ?? null }); setToast('Traspaso recibido · stock sumado'); refresh() }
+  const doAdjust = async () => { await write(() => sb.from('stock_movements').insert({ product_id: adjust!.id, branch_id: branch!.id, qty: adj.qty, type: 'ajuste', note: adj.note || 'Ajuste manual', staff_id: me?.id ?? null })); setAdjust(null); setAdj({ qty: 0, note: '' }); setToast('Ajuste registrado'); refresh() }
+  const doSend = async (id: string) => { const r = (await transferSend(id, me?.id ?? null)) as unknown as { intercompany: boolean }[]; setToast(r[0].intercompany ? 'Traspaso enviado · documento intercompany generado automáticamente' : 'Traspaso enviado · stock descontado'); refresh() }
+  const doReceive = async (id: string) => { await transferReceive(id, me?.id ?? null); setToast('Traspaso recibido · stock sumado'); refresh() }
   const doCount = async () => {
     const objs = Object.entries(count).filter(([id, v]) => { const p = products.find((x) => x.id === id); return p && v !== (p.stock[0]?.qty ?? 0) }).map(([id, v]) => { const p = products.find((x) => x.id === id)!; return { product_id: id, branch_id: branch!.id, qty: v - (p.stock[0]?.qty ?? 0), type: 'conteo', note: `Conteo físico: ${v} (sistema ${p.stock[0]?.qty ?? 0})`, staff_id: me?.id ?? null } })
-    if (objs.length) await gql(COUNT, { objs }); setToast(`Conteo aplicado · ${objs.length} ajustes`); setCount({}); refresh()
+    if (objs.length) await write(() => sb.from('stock_movements').insert(objs)); setToast(`Conteo aplicado · ${objs.length} ajustes`); setCount({}); refresh()
   }
 
   return (
@@ -125,7 +134,7 @@ function NuevoTraspaso({ onClose, onCreated, products, fromBranchId, branches, c
   const ic = from && dest && from.company_id !== dest.company_id
   const filtered = products.filter((p) => search && (p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())) && (p.stock[0]?.qty ?? 0) > 0).slice(0, 8)
   const save = async () => {
-    const r = await gql<{ insert_transfers_one: { number: string } }>(NEW_TRANSFER, { o: { number: `TR-${String(Date.now()).slice(-6)}`, from_branch_id: fromBranchId, to_branch_id: to, status: 'borrador', requested_by: requesterId, note: 'Creado desde Stock', transfer_items: { data: items.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_cost: products.find((p) => p.id === i.product_id)?.cost ?? 0 })) } } })
+    const r = { insert_transfers_one: await createTransfer({ number: `TR-${String(Date.now()).slice(-6)}`, from_branch_id: fromBranchId, to_branch_id: to, requested_by: requesterId, note: 'Creado desde Stock' }, items.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_cost: products.find((p) => p.id === i.product_id)?.cost ?? 0 }))) }
     onCreated(r.insert_transfers_one.number)
   }
   return (

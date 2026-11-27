@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { LayoutDashboard, ShoppingCart, Wallet, Users, Eye, FileText, FlaskConical, Inbox, Boxes, RotateCcw, Building2, BarChart3, Settings, Bell, LogOut, Menu, X, ChevronDown, RefreshCw, CalendarDays, Wifi, WifiOff } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Wallet, Users, Eye, FileText, FlaskConical, Inbox, Boxes, RotateCcw, Building2, BarChart3, Settings, Bell, LogOut, Menu, X, ChevronDown, RefreshCw, CalendarDays, Wifi } from 'lucide-react'
 import { useApp } from '../lib/app'
 import { useAuth } from '../lib/auth'
-import { gql, isDevMode, setWriteGuard } from '../lib/nhost'
+import { sb, run, setWriteGuard } from '../lib/supabase'
 import { moduleOfPath } from '../lib/permissions'
 import type { Alert } from '../lib/types'
 import { Avatar, Badge, Toast } from './ui'
@@ -30,7 +30,6 @@ const NAV = [
   { to: '/configuracion', label: 'Configuración', icon: Settings },
 ]
 
-const ALERTS_Q = `query Alerts($company: uuid!) { v_alerts(where:{company_id:{_eq:$company}}, order_by:{at:desc}, limit: 60) { kind company_id branch_id ref_id message at severity branch { name } } }`
 
 export default function Layout() {
   const { companies, branches, company, branch, setCompanyId, setBranchId, me, cashSession, access } = useApp()
@@ -44,8 +43,8 @@ export default function Layout() {
   const [bell, setBell] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   useEffect(() => { const h = (e: Event) => setErr((e as CustomEvent<string>).detail); window.addEventListener('gql-error', h); return () => window.removeEventListener('gql-error', h) }, [])
-  const alerts = useQuery({ queryKey: ['alerts', company?.id], queryFn: () => gql<{ v_alerts: Alert[] }>(ALERTS_Q, { company: company!.id }), enabled: !!company, refetchInterval: 60_000 })
-  const alertList = alerts.data?.v_alerts ?? []
+  const alerts = useQuery({ queryKey: ['alerts', company?.id], queryFn: () => run(sb.from('v_alerts').select('kind,company_id,branch_id,ref_id,message,at,severity').eq('company_id', company!.id).order('at', { ascending: false }).limit(60)) as Promise<Alert[]>, enabled: !!company, refetchInterval: 60_000 })
+  const alertList = (alerts.data ?? []).map((a) => ({ ...a, branch: branches.find((b) => b.id === a.branch_id) }))
   const high = alertList.filter((a) => a.severity === 'alta').length
 
   const Sidebar = (
@@ -69,7 +68,7 @@ export default function Layout() {
         <div className={clsx('flex items-center gap-2 rounded-xl px-3 py-2', cashSession ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300')}>
           <Wallet size={14} />{cashSession ? `Caja abierta · ${ago(cashSession.opened_at)}` : 'Caja cerrada'}
         </div>
-        <div className="mt-2 flex items-center gap-1.5 px-3 text-slate-500">{isDevMode ? <><WifiOff size={12} />Modo desarrollo local</> : <><Wifi size={12} />Nhost · eu-central-1</>}</div>
+        <div className="mt-2 flex items-center gap-1.5 px-3 text-slate-500"><Wifi size={12} />Supabase · eu-west-1</div>
       </div>
     </aside>
   )

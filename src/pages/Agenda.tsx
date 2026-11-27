@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight, Eye, Check, X as XIcon } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, write } from '../lib/supabase'
 import { Card, PageHeader, Loading, StatusBadge, Avatar, Empty, Badge, Tabs } from '../components/ui'
 import { fdate, ftime, fullName, SOURCES } from '../lib/format'
 import type { Appointment } from '../lib/types'
 
-const Q = `query Agenda($branch: uuid!, $from: timestamptz!, $to: timestamptz!) { appointments(where:{branch_id:{_eq:$branch}, scheduled_at:{_gte:$from, _lt:$to}}, order_by:{scheduled_at:asc}) { id scheduled_at duration_min status source notes customer_id customer { id first_name last_name phone code } optometrist { name } } }`
-const SET = `mutation SetAppt($id: uuid!, $status: String!) { update_appointments_by_pk(pk_columns:{id:$id}, _set:{status:$status}) { id } }`
+const loadAgenda = (branch: string, from: string, to: string) => run(sb.from('appointments')
+  .select('id,scheduled_at,duration_min,status,source,notes,customer_id,customer:customers(id,first_name,last_name,phone,code),optometrist:staff!optometrist_id(name)')
+  .eq('branch_id', branch).gte('scheduled_at', from).lt('scheduled_at', to).order('scheduled_at')) as unknown as Promise<Appointment[]>
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d) }
@@ -29,9 +30,9 @@ export default function Agenda() {
   const range = view === 'dia' ? [cur, addDays(cur, 1)]
     : view === 'semana' ? [startOfWeek(cur), addDays(startOfWeek(cur), 7)]
     : (() => { const first = new Date(cur.getFullYear(), cur.getMonth(), 1); const gs = startOfWeek(first); return [gs, addDays(gs, 42)] })()
-  const q = useQuery({ queryKey: ['agenda', branch?.id, view, ymd(range[0])], queryFn: () => gql<{ appointments: Appointment[] }>(Q, { branch: branch!.id, from: range[0].toISOString(), to: range[1].toISOString() }), enabled: !!branch })
+  const q = useQuery({ queryKey: ['agenda', branch?.id, view, ymd(range[0])], queryFn: () => loadAgenda(branch!.id, range[0].toISOString(), range[1].toISOString()).then((appointments) => ({ appointments })), enabled: !!branch })
   const shift = (n: number) => { const d = new Date(cur); if (view === 'dia') d.setDate(d.getDate() + n); else if (view === 'semana') d.setDate(d.getDate() + 7 * n); else d.setMonth(d.getMonth() + n, 1); setDay(ymd(d)) }
-  const set = async (id: string, status: string) => { await gql(SET, { id, status }); void q.refetch() }
+  const set = async (id: string, status: string) => { await write(() => sb.from('appointments').update({ status }).eq('id', id)); void q.refetch() }
   const all = q.data?.appointments ?? []
   const inMonth = (a: Appointment) => view !== 'mes' || new Date(a.scheduled_at).getMonth() === cur.getMonth()
   const list = all.filter(inMonth)

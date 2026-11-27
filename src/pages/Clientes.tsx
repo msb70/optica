@@ -4,20 +4,28 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { Search, UserPlus, Phone, Mail } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runCount, likeTerm } from '../lib/supabase'
 import { Card, PageHeader, Loading, Badge, Avatar, Empty } from '../components/ui'
 import { money, fdate, SOURCES, fullName } from '../lib/format'
 import { NewCustomerModal } from './POS'
 import type { Customer } from '../lib/types'
 
-const Q = `query Customers($q: String!, $source: [String!]) {
-  customers(where:{source:{_in:$source}, _or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{email:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, order_by:{created_at:desc}, limit: 100) {
-    id code first_name last_name email phone tax_id birth_date gender source balance tags created_at branch { name }
-    sales_aggregate(where:{status:{_in:["completada","parcial"]}}) { aggregate { count sum { total } max { sale_date } } }
-    exams(order_by:{exam_date:desc}, limit:1) { exam_date next_review_date }
-  }
-  customers_aggregate { aggregate { count } }
-}`
+async function loadCustomers(search: string, source: string[]) {
+  const t = likeTerm(search)
+  const [rows, total] = await Promise.all([
+    run(sb.from('customers')
+      .select('id,code,first_name,last_name,email,phone,tax_id,birth_date,gender,source,balance,tags,created_at,branch:branches(name),sales(count:id.count(),total:total.sum(),last:sale_date.max()),exams(exam_date,next_review_date)')
+      .in('source', source)
+      .or(['first_name', 'last_name', 'phone', 'code', 'email', 'tax_id'].map((c) => `${c}.ilike.${t}`).join(','))
+      .in('sales.status', ['completada', 'parcial'])
+      .order('exam_date', { referencedTable: 'exams', ascending: false }).limit(1, { referencedTable: 'exams' })
+      .order('created_at', { ascending: false }).limit(100)),
+    runCount(sb.from('customers').select('id', { count: 'exact', head: true })),
+  ])
+  type Agg = { count: number; total: number | null; last: string | null }
+  const customers = (rows as unknown as (Row & { sales: Agg[] })[]).map(({ sales, ...c }) => ({ ...c, sales_aggregate: { aggregate: { count: Number(sales?.[0]?.count ?? 0), sum: { total: sales?.[0]?.total ?? null }, max: { sale_date: sales?.[0]?.last ?? null } } } })) as Row[]
+  return { customers, customers_aggregate: { aggregate: { count: total.count } } }
+}
 type Row = Customer & { branch?: { name: string }; sales_aggregate: { aggregate: { count: number; sum: { total: number | null }; max: { sale_date: string | null } } }; exams: { exam_date: string; next_review_date?: string | null }[] }
 
 export default function Clientes() {
@@ -25,7 +33,7 @@ export default function Clientes() {
   const [search, setSearch] = useState('')
   const [source, setSource] = useState('')
   const [open, setOpen] = useState(false)
-  const q = useQuery({ queryKey: ['customers', company?.id, search, source], queryFn: () => gql<{ customers: Row[]; customers_aggregate: { aggregate: { count: number } } }>(Q, { q: `%${search}%`, source: source ? [source] : Object.keys(SOURCES) }), enabled: !!company })
+  const q = useQuery({ queryKey: ['customers', company?.id, search, source], queryFn: () => loadCustomers(search, source ? [source] : Object.keys(SOURCES)), enabled: !!company })
   const today = new Date().toISOString().slice(0, 10)
   return (
     <div className="space-y-4">

@@ -4,18 +4,23 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { Search, Plus, Minus, Trash2, UserPlus, CreditCard, Banknote, Smartphone, ArrowLeftRight, Ticket, Wallet, CheckCircle2, Printer, X, Glasses, Percent } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll, write, likeTerm } from '../lib/supabase'
+import { createSale } from '../lib/ops'
 import { Modal, Badge, Field, Toast, Avatar } from '../components/ui'
 import { money, CATEGORIES, METHODS, SOURCES, fullName, normPhone } from '../lib/format'
 import type { Product, Customer, Quote } from '../lib/types'
 
-const PRODUCTS_Q = `query PosProducts($branch: uuid!) { products(where:{active:{_eq:true}}, order_by:[{name:asc}]) { id sku barcode name category brand model color cost price min_stock track_stock active stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
-const CUSTOMERS_Q = `query PosCustomers($q: String!) { customers(where:{_or:[{first_name:{_ilike:$q}},{last_name:{_ilike:$q}},{phone:{_ilike:$q}},{code:{_ilike:$q}},{tax_id:{_ilike:$q}}]}, limit: 8, order_by:{last_name:asc}) { id code first_name last_name phone email balance source tax_id } }`
-const QUOTE_Q = `query PosQuote($id: uuid!) { quotes_by_pk(id:$id) { id number customer_id discount status customer { id code first_name last_name phone email balance source tax_id } quote_items { product_id qty unit_price discount_pct description } } }`
-const VOUCHER_Q = `query Voucher($code: String!, $company: uuid!) { vouchers(where:{code:{_eq:$code}, company_id:{_eq:$company}, status:{_eq:"activo"}}) { id code kind amount balance discount_pct } }`
-const CREATE_SALE = `mutation CreateSale($co: uuid!, $br: uuid!, $cu: uuid!, $se: uuid, $items: jsonb!, $pay: jsonb!, $disc: numeric, $quote: uuid, $cash: uuid, $notes: String) {
-  create_sale(args:{p_company_id:$co, p_branch_id:$br, p_customer_id:$cu, p_seller_id:$se, p_items:$items, p_payments:$pay, p_discount:$disc, p_quote_id:$quote, p_cash_session_id:$cash, p_notes:$notes}) { id number total paid status delivery_status } }`
-const NEW_CUSTOMER = `mutation NewCustomer($o: customers_insert_input!) { insert_customers_one(object:$o) { id code first_name last_name phone email balance source tax_id } }`
+const CUST = 'id,code,first_name,last_name,phone,email,balance,source,tax_id'
+const loadPosProducts = (branch: string) => runAll(() => sb.from('products').select('id,sku,barcode,name,category,brand,model,color,cost,price,min_stock,track_stock,active,stock(qty,reserved)').eq('active', true).eq('stock.branch_id', branch).order('name').order('id'))
+  .then((products) => ({ products: products as unknown as PosProduct[] }))
+const searchPosCustomers = (q: string) => run(sb.from('customers').select(CUST).or(['first_name', 'last_name', 'phone', 'code', 'tax_id'].map((c) => `${c}.ilike.${likeTerm(q)}`).join(',')).order('last_name').limit(8))
+  .then((customers) => ({ customers: customers as unknown as Customer[] }))
+const loadQuote = (id: string) => run(sb.from('quotes').select(`id,number,customer_id,discount,status,customer:customers(${CUST}),quote_items(product_id,qty,unit_price,discount_pct,description)`).eq('id', id).maybeSingle())
+  .then((q) => ({ quotes_by_pk: q as unknown as Quote & { customer: Customer } }))
+
+
+
+
 
 type PosProduct = Product & { stock: { qty: number }[] }
 type Line = { product: PosProduct; qty: number; discount_pct: number }
@@ -47,21 +52,21 @@ export default function POS() {
   const sellers = staff.filter((s) => s.branch_id === branch?.id && ['vendedor', 'gerente', 'admin'].includes(s.role))
   useEffect(() => { if (!sellerId) setSellerId(me && me.role !== 'cajero' ? me.id : sellers[0]?.id ?? '') }, [me, sellers, sellerId])
 
-  const products = useQuery({ queryKey: ['pos-products', branch?.id], queryFn: () => gql<{ products: PosProduct[] }>(PRODUCTS_Q, { branch: branch!.id }), enabled: !!branch, staleTime: 30_000 })
-  const custs = useQuery({ queryKey: ['pos-cust', company?.id, custQ], queryFn: () => gql<{ customers: Customer[] }>(CUSTOMERS_Q, { q: `%${custQ}%` }), enabled: !!company && custQ.length >= 2 })
+  const products = useQuery({ queryKey: ['pos-products', branch?.id], queryFn: () => loadPosProducts(branch!.id), enabled: !!branch, staleTime: 30_000 })
+  const custs = useQuery({ queryKey: ['pos-cust', company?.id, custQ], queryFn: () => searchPosCustomers(custQ), enabled: !!company && custQ.length >= 2 })
 
   // Cliente preseleccionado desde su ficha
   useEffect(() => {
     const cid = params.get('customer')
     if (!cid || customer) return
-    gql<{ customers_by_pk: Customer }>(`query PosCustOne($id: uuid!) { customers_by_pk(id:$id) { id code first_name last_name phone email balance source tax_id } }`, { id: cid }).then((r) => r.customers_by_pk && setCustomer(r.customers_by_pk))
+    run(sb.from('customers').select(CUST).eq('id', cid).maybeSingle()).then((c) => c && setCustomer(c as unknown as Customer))
   }, [params, customer])
 
   // Cargar cotización desde URL
   useEffect(() => {
     const id = params.get('quote')
     if (!id || !products.data) return
-    gql<{ quotes_by_pk: Quote & { customer: Customer } }>(QUOTE_Q, { id }).then(({ quotes_by_pk: q }) => {
+    loadQuote(id).then(({ quotes_by_pk: q }) => {
       if (!q) return
       setQuoteId(q.id); setCustomer(q.customer); setDiscount(Number(q.discount))
       setLines(q.quote_items!.filter((i) => i.product_id).map((i) => ({ product: products.data!.products.find((p) => p.id === i.product_id)!, qty: i.qty, discount_pct: Number(i.discount_pct) })).filter((l) => l.product))
@@ -110,12 +115,12 @@ export default function POS() {
     if (!company || !branch || !customer) return
     setBusy(true)
     try {
-      const r = await gql<{ create_sale: { id: string; number: string; total: number; paid: number; delivery_status: string }[] }>(CREATE_SALE, {
-        co: company.id, br: branch.id, cu: customer.id, se: sellerId || null,
+      const r = (await createSale({
+        company: company.id, branch: branch.id, customer: customer.id, seller: sellerId || null,
         items: lines.map((l) => ({ product_id: l.product.id, qty: l.qty, unit_price: l.product.price, discount_pct: l.discount_pct })),
-        pay: pays, disc: discount, quote: quoteId, cash: cashSession?.id ?? null, notes: null,
-      })
-      const s = r.create_sale[0]
+        payments: pays, discount, quote: quoteId, cashSession: cashSession?.id ?? null, notes: null,
+      })) as unknown as { id: string; number: string; total: number; paid: number; delivery_status: string }[]
+      const s = r[0]
       setDone(s); setPayOpen(false)
       void qc.invalidateQueries({ queryKey: ['pos-products'] }); void qc.invalidateQueries({ queryKey: ['dash'] }); void qc.invalidateQueries({ queryKey: ['alerts'] })
     } catch (e) { setToast((e as Error).message) } finally { setBusy(false) }
@@ -245,7 +250,7 @@ function PayForm({ total, pays, setPays, pending, customer, companyId, currency 
 
   const lookupVoucher = async () => {
     setErr(null)
-    const r = await gql<{ vouchers: { id: string; code: string; balance: number; kind: string }[] }>(VOUCHER_Q, { code: voucherCode.trim().toUpperCase(), company: companyId })
+    const r = { vouchers: (await run(sb.from('vouchers').select('id,code,kind,amount,balance,discount_pct').eq('code', voucherCode.trim().toUpperCase()).eq('company_id', companyId).eq('status', 'activo'))) as unknown as { id: string; code: string; balance: number; kind: string }[] }
     const v = r.vouchers[0]
     if (!v || v.kind !== 'vale') { setErr('Vale no válido o sin saldo'); setVoucher(null); return }
     setVoucher(v); setAmount(Math.min(Number(v.balance), pending))
@@ -300,7 +305,7 @@ export function NewCustomerModal({ open, onClose, initial = '', companyId, branc
   const phoneOk = normPhone(f.phone).length >= 7
   const checkDupe = async (phone: string) => {
     const n = normPhone(phone); if (n.length < 7) { setDupe(null); return null }
-    const r = await gql<{ customers: Customer[] }>(`query Dupe($p: String!) { customers(where:{phone_norm:{_eq:$p}}, limit:1) { id code first_name last_name phone email balance source tax_id } }`, { p: n })
+    const r = { customers: (await run(sb.from('customers').select(CUST).eq('phone_norm', n).limit(1))) as unknown as Customer[] }
     setDupe(r.customers[0] ?? null); return r.customers[0] ?? null
   }
   const save = async () => {
@@ -308,7 +313,7 @@ export function NewCustomerModal({ open, onClose, initial = '', companyId, branc
     try {
       if (await checkDupe(f.phone)) { setErr('Ya existe un cliente con ese teléfono'); return }
       const code = 'C' + String(Date.now()).slice(-7)
-      const r = await gql<{ insert_customers_one: Customer }>(NEW_CUSTOMER, { o: { ...f, birth_date: f.birth_date || null, email: f.email || null, tax_id: f.tax_id || null, company_id: companyId, branch_id: branchId, code } })
+      const r = { insert_customers_one: (await write(() => sb.from('customers').insert({ ...f, birth_date: f.birth_date || null, email: f.email || null, tax_id: f.tax_id || null, company_id: companyId, branch_id: branchId, code }).select(CUST).single())) as unknown as Customer }
       onCreated(r.insert_customers_one)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }

@@ -3,25 +3,36 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { DollarSign, Receipt, Percent, Package, Users, Target, ArrowRight, AlertTriangle } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runCount } from '../lib/supabase'
 import { Card, KPI, PageHeader, Loading, Badge, Progress, Tabs, StatusBadge, Avatar } from '../components/ui'
 import { AreaTrend, Bars, Donut } from '../components/charts'
 import { money, num, pct, monthLabel, monthStartISO, SOURCES, fdate, fullName } from '../lib/format'
 import { alertKind, alertRoute } from '../components/Layout'
-import type { Alert, Sale } from '../lib/types'
+import type { Alert, Branch, Sale } from '../lib/types'
 
-const Q = `query Dash($company: uuid!, $branch: uuid!, $from: date!, $scopeBranch: Boolean!, $today: timestamptz!, $fromTs: timestamptz!) {
-  kpi: v_kpi_branch_month(where:{company_id:{_eq:$company}, month:{_gte:$from}}, order_by:{month:asc}) { branch_id month tickets revenue avg_ticket discounts gross_margin margin_pct units lens_revenue frame_revenue avg_delivery_days branch { name monthly_goal } }
-  daily: v_sales_daily(where:{company_id:{_eq:$company}, day:{_gte:$from}}, order_by:{day:asc}) { branch_id day tickets revenue units }
-  funnel: v_funnel_month(where:{company_id:{_eq:$company}, month:{_gte:$from}}) { branch_id month citas examenes cotizaciones ventas entregas }
-  sellers: v_sales_by_seller(where:{company_id:{_eq:$company}, month:{_gte:$from}}, order_by:{revenue:desc}) { branch_id seller_id seller_name month tickets revenue avg_ticket commissions }
-  sources: v_sales_by_source(where:{company_id:{_eq:$company}, month:{_gte:$from}}) { branch_id source month tickets revenue }
-  alerts: v_alerts(where:{company_id:{_eq:$company}}, order_by:{at:desc}, limit:8) { kind company_id branch_id ref_id message at severity branch { name } }
-  today: sales_aggregate(where:{branch_id:{_eq:$branch}, sale_date:{_gte:$today}, status:{_in:["completada","parcial"]}}) { aggregate { count sum { total } } }
-  recent: sales(where:{branch_id:{_eq:$branch}}, order_by:{sale_date:desc}, limit:8) { id number sale_date total status delivery_status customer { first_name last_name } seller { name } }
-  rmas_aggregate(where:{company_id:{_eq:$company}, created_at:{_gte:$fromTs}}) { aggregate { count } }
-  _b: branches(where:{id:{_eq:$branch}}) @include(if:$scopeBranch) { id }
-}`
+type DashData = { kpi: Row[]; daily: Row[]; funnel: Row[]; sellers: Row[]; sources: Row[]; alerts: Alert[]; today: { aggregate: { count: number; sum: { total: number | null } } }; recent: Sale[]; rmas_aggregate: { aggregate: { count: number } } }
+async function loadDash(company: string, branch: string, from: string, today: string, branchesById: Map<string, Branch>): Promise<DashData> {
+  const [kpi, daily, funnel, sellers, sources, alerts, todayRows, recent, rmas] = await Promise.all([
+    run(sb.from('v_kpi_branch_month').select('branch_id,month,tickets,revenue,avg_ticket,discounts,gross_margin,margin_pct,units,lens_revenue,frame_revenue,avg_delivery_days').eq('company_id', company).gte('month', from).order('month')),
+    run(sb.from('v_sales_daily').select('branch_id,day,tickets,revenue,units').eq('company_id', company).gte('day', from).order('day')),
+    run(sb.from('v_funnel_month').select('branch_id,month,citas,examenes,cotizaciones,ventas,entregas').eq('company_id', company).gte('month', from)),
+    run(sb.from('v_sales_by_seller').select('branch_id,seller_id,seller_name,month,tickets,revenue,avg_ticket,commissions').eq('company_id', company).gte('month', from).order('revenue', { ascending: false })),
+    run(sb.from('v_sales_by_source').select('branch_id,source,month,tickets,revenue').eq('company_id', company).gte('month', from)),
+    run(sb.from('v_alerts').select('kind,company_id,branch_id,ref_id,message,at,severity').eq('company_id', company).order('at', { ascending: false }).limit(8)),
+    run(sb.from('sales').select('count:id.count(),total:total.sum()').eq('branch_id', branch).gte('sale_date', today).in('status', ['completada', 'parcial'])),
+    run(sb.from('sales').select('id,number,sale_date,total,status,delivery_status,customer:customers(first_name,last_name),seller:staff!seller_id(name)').eq('branch_id', branch).order('sale_date', { ascending: false }).limit(8)),
+    runCount(sb.from('rmas').select('id', { count: 'exact', head: true }).eq('company_id', company).gte('created_at', from + 'T00:00:00Z')),
+  ])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const withBranch = (rows: any[]) => rows.map((r) => ({ ...r, branch: branchesById.get(r.branch_id as string) }))
+  const t = (todayRows as unknown as { count: number; total: number | null }[])[0] ?? { count: 0, total: 0 }
+  return {
+    kpi: withBranch(kpi as Row[]) as Row[], daily: daily as Row[], funnel: funnel as Row[], sellers: sellers as Row[], sources: sources as Row[],
+    alerts: withBranch(alerts as Alert[]) as Alert[],
+    today: { aggregate: { count: Number(t.count ?? 0), sum: { total: t.total } } },
+    recent: recent as unknown as Sale[], rmas_aggregate: { aggregate: { count: rmas.count } },
+  }
+}
 
 type Row = Record<string, string | number | null> & { branch?: { name: string; monthly_goal: number } }
 
@@ -31,7 +42,7 @@ export default function Dashboard() {
   const from = monthStartISO(5)
   const q = useQuery({
     queryKey: ['dash', company?.id, branch?.id, from],
-    queryFn: () => gql<{ kpi: Row[]; daily: Row[]; funnel: Row[]; sellers: Row[]; sources: Row[]; alerts: Alert[]; today: { aggregate: { count: number; sum: { total: number | null } } }; recent: Sale[]; rmas_aggregate: { aggregate: { count: number } } }>(Q, { company: company!.id, branch: branch!.id, from, scopeBranch: false, today: new Date().toISOString().slice(0, 10), fromTs: from + 'T00:00:00Z' }),
+    queryFn: () => loadDash(company!.id, branch!.id, from, new Date().toISOString().slice(0, 10), new Map(branches.map((b) => [b.id, b]))),
     enabled: !!company && !!branch,
   })
 

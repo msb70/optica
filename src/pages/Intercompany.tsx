@@ -3,26 +3,41 @@ import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Plus, Building2, ArrowRight, CheckCircle2, FileText, Trash2 } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll, write } from '../lib/supabase'
+import { createTransfer, insertNested, transferSend } from '../lib/ops'
 import { Card, PageHeader, Loading, StatusBadge, Modal, Field, Tabs, Badge, Empty, Toast, KPI } from '../components/ui'
 import { money, fdate, STATUS_LABEL } from '../lib/format'
 import { Bars } from '../components/charts'
 import type { IntercompanyDoc } from '../lib/types'
 
-const Q = `query IC($company: uuid!) {
-  docs: intercompany_docs(where:{_or:[{issuer_company_id:{_eq:$company}},{receiver_company_id:{_eq:$company}}]}, order_by:{doc_date:desc}) { id number issuer_company_id receiver_company_id doc_date due_date concept origin_type subtotal tax total status ar_status ap_status zoho_invoice_id zoho_bill_id zoho_sync_status created_at issuer_company { code legal_name } receiver_company { code legal_name } creator { name } intercompany_items { id description qty unit_price line_total } }
-  rules: intercompany_rules(order_by:{issuer_company_id:asc}) { id issuer_company_id receiver_company_id markup_pct auto_on_transfer auto_on_lab_order payment_terms_days active issuer_company { code } receiver_company { code } }
-  balances: v_intercompany_balance { issuer_company_id receiver_company_id pending_total paid_total docs issuer_company { code } receiver_company { code } }
-  audit: audit_log(where:{entity:{_eq:"intercompany_docs"}}, order_by:{created_at:desc}, limit: 20) { id action actor entity_id created_at data }
-}`
-const SET = `mutation SetIC($id: uuid!, $set: intercompany_docs_set_input!) { update_intercompany_docs_by_pk(pk_columns:{id:$id}, _set:$set) { id } }`
-const INSERT = `mutation NewIC($o: intercompany_docs_insert_input!) { insert_intercompany_docs_one(object:$o) { id number } }`
-const RULE = `mutation Rule($o: intercompany_rules_insert_input!) { insert_intercompany_rules_one(object:$o, on_conflict:{constraint: intercompany_rules_issuer_company_id_receiver_company_id_key, update_columns:[markup_pct, auto_on_transfer, auto_on_lab_order, payment_terms_days, active]}) { id } }`
+type ICData = { docs: Doc[]; rules: Rule[]; balances: { issuer_company_id: string; receiver_company_id: string; pending_total: number | null; paid_total: number | null; docs: number; issuer_company: { code: string }; receiver_company: { code: string } }[]; audit: { id: number; action: string; actor?: string; entity_id: string; created_at: string; data: Record<string, unknown> }[] }
+async function loadIC(company: string, codes: Map<string, string>): Promise<ICData> {
+  const [docs, rules, balances, audit] = await Promise.all([
+    run(sb.from('intercompany_docs').select('id,number,issuer_company_id,receiver_company_id,doc_date,due_date,concept,origin_type,subtotal,tax,total,status,ar_status,ap_status,zoho_invoice_id,zoho_bill_id,zoho_sync_status,created_at,issuer_company:companies!issuer_company_id(code,legal_name),receiver_company:companies!receiver_company_id(code,legal_name),creator:staff!created_by(name),intercompany_items(id,description,qty,unit_price,line_total)')
+      .or(`issuer_company_id.eq.${company},receiver_company_id.eq.${company}`).order('doc_date', { ascending: false })),
+    run(sb.from('intercompany_rules').select('id,issuer_company_id,receiver_company_id,markup_pct,auto_on_transfer,auto_on_lab_order,payment_terms_days,active,issuer_company:companies!issuer_company_id(code),receiver_company:companies!receiver_company_id(code)').order('issuer_company_id')),
+    run(sb.from('v_intercompany_balance').select('issuer_company_id,receiver_company_id,pending_total,paid_total,docs')),
+    run(sb.from('audit_log').select('id,action,actor,entity_id,created_at,data').eq('entity', 'intercompany_docs').order('created_at', { ascending: false }).limit(20)),
+  ])
+  const code = (id: string) => ({ code: codes.get(id) ?? '' })
+  return {
+    docs: docs as unknown as Doc[], rules: rules as unknown as Rule[], audit: audit as unknown as ICData['audit'],
+    balances: (balances as { issuer_company_id: string; receiver_company_id: string; pending_total: number | null; paid_total: number | null; docs: number }[]).map((b) => ({ ...b, issuer_company: code(b.issuer_company_id), receiver_company: code(b.receiver_company_id) })),
+  }
+}
 
-const PRODUCTS_Q = `query ICProducts($branch: uuid!) { products(where:{active:{_eq:true}, track_stock:{_eq:true}}, order_by:{name:asc}) { id sku name cost stock(where:{branch_id:{_eq:$branch}}) { qty } } }`
-const NEW_TRANSFER = `mutation NewTransfer($o: transfers_insert_input!) { insert_transfers_one(object:$o) { id number } }`
-const SEND = `mutation Send($id: uuid!, $staff: uuid) { transfer_send(args:{p_transfer_id:$id, p_staff_id:$staff}) { id status intercompany intercompany_doc_id } }`
-const DOC_NUM = `query DocNum($id: uuid!) { intercompany_docs_by_pk(id:$id) { number total } }`
+
+
+
+
+
+
+
+
+const loadICProducts = (branch: string) => runAll(() => sb.from('products').select('id,sku,name,cost,stock(qty)').eq('active', true).eq('track_stock', true).eq('stock.branch_id', branch).order('name').order('id')).then((products) => ({ products: products as unknown as ICProduct[] }))
+
+
+
 type ICProduct = { id: string; sku: string; name: string; cost: number; stock: { qty: number }[] }
 
 type Doc = IntercompanyDoc & { creator?: { name: string } }
@@ -34,7 +49,7 @@ export default function Intercompany() {
   const [sel, setSel] = useState<Doc | null>(null)
   const [nuevo, setNuevo] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const q = useQuery({ queryKey: ['ic', company?.id], queryFn: () => gql<{ docs: Doc[]; rules: Rule[]; balances: { issuer_company_id: string; receiver_company_id: string; pending_total: number | null; paid_total: number | null; docs: number; issuer_company: { code: string }; receiver_company: { code: string } }[]; audit: { id: number; action: string; actor?: string; entity_id: string; created_at: string; data: Record<string, unknown> }[] }>(Q, { company: company!.id }), enabled: !!company })
+  const q = useQuery({ queryKey: ['ic', company?.id], queryFn: () => loadIC(company!.id, new Map(companies.map((c) => [c.id, c.code]))), enabled: !!company })
   if (q.isLoading) return <Loading />
   const docs = q.data?.docs ?? []
   const ar = docs.filter((d) => d.issuer_company_id === company?.id)
@@ -44,7 +59,7 @@ export default function Intercompany() {
   const list = tab === 'cobrar' ? ar : tab === 'pagar' ? ap : docs
   const monthly = Object.values(docs.reduce<Record<string, { month: string; emitido: number; recibido: number }>>((a, d) => { const m = d.doc_date.slice(0, 7); a[m] ??= { month: fdate(d.doc_date, 'MMM yy'), emitido: 0, recibido: 0 }; if (d.issuer_company_id === company?.id) a[m].emitido += Number(d.total); else a[m].recibido += Number(d.total); return a }, {})).slice(0, 6).reverse()
 
-  const act = async (d: Doc, set: Record<string, unknown>, msg: string) => { await gql(SET, { id: d.id, set }); setSel(null); setToast(msg); void q.refetch() }
+  const act = async (d: Doc, set: Record<string, unknown>, msg: string) => { await write(() => sb.from('intercompany_docs').update(set).eq('id', d.id)); setSel(null); setToast(msg); void q.refetch() }
 
   return (
     <div className="space-y-4">
@@ -100,7 +115,7 @@ export default function Intercompany() {
 
 function Reglas({ rules, companies, onSaved }: { rules: Rule[]; companies: { id: string; code: string; legal_name: string }[]; onSaved: () => void }) {
   const [f, setF] = useState({ issuer_company_id: companies[0]?.id ?? '', receiver_company_id: companies[1]?.id ?? '', markup_pct: 0, auto_on_transfer: true, auto_on_lab_order: false, payment_terms_days: 30, active: true })
-  const save = async () => { await gql(RULE, { o: f }); onSaved() }
+  const save = async () => { await write(() => sb.from('intercompany_rules').upsert(f, { onConflict: 'issuer_company_id,receiver_company_id' })); onSaved() }
   return (
     <div className="grid lg:grid-cols-3 gap-4">
       <Card title="Reglas configuradas" subtitle="Una regla por relación emisora → receptora" className="lg:col-span-2" padded={false}>
@@ -135,7 +150,7 @@ function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, st
   const [pq, setPq] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const prodQ = useQuery({ queryKey: ['ic-products', fromB], queryFn: () => gql<{ products: ICProduct[] }>(PRODUCTS_Q, { branch: fromB }), enabled: isTr && !!fromB })
+  const prodQ = useQuery({ queryKey: ['ic-products', fromB], queryFn: () => loadICProducts(fromB), enabled: isTr && !!fromB })
   const prods = prodQ.data?.products ?? []
   const avail = (p?: ICProduct) => Number(p?.stock[0]?.qty ?? 0)
   const rule = rules.find((r) => r.issuer_company_id === issuerId && r.receiver_company_id === f.receiver_company_id && r.active && r.auto_on_transfer)
@@ -146,17 +161,19 @@ function NuevoDoc({ onClose, onCreated, companies, issuerId, prefix, taxRate, st
   const saveTransfer = async () => {
     setErr(null); setBusy(true)
     try {
-      const t = await gql<{ insert_transfers_one: { id: string; number: string } }>(NEW_TRANSFER, { o: { number: `TR-${String(Date.now()).slice(-6)}`, from_branch_id: fromB, to_branch_id: toBranch, status: 'borrador', requested_by: staffId, note: f.concept || 'Traspaso intercompany', transfer_items: { data: tItems.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_cost: prods.find((p) => p.id === i.product_id)?.cost ?? 0 })) } } })
-      const sent = await gql<{ transfer_send: { intercompany_doc_id: string | null }[] }>(SEND, { id: t.insert_transfers_one.id, staff: staffId })
+      const t = { insert_transfers_one: await createTransfer({ number: `TR-${String(Date.now()).slice(-6)}`, from_branch_id: fromB, to_branch_id: toBranch, requested_by: staffId, note: f.concept || 'Traspaso intercompany' }, tItems.map((i) => ({ product_id: i.product_id, qty: i.qty, unit_cost: prods.find((p) => p.id === i.product_id)?.cost ?? 0 }))) }
+      const sent = { transfer_send: (await transferSend(t.insert_transfers_one.id, staffId)) as unknown as { intercompany_doc_id: string | null }[] }
       const docId = sent.transfer_send[0]?.intercompany_doc_id
-      const d = docId ? await gql<{ intercompany_docs_by_pk: { number: string } }>(DOC_NUM, { id: docId }) : null
+      const d = docId ? { intercompany_docs_by_pk: (await run(sb.from('intercompany_docs').select('number,total').eq('id', docId).single())) as unknown as { number: string } } : null
       onCreated(`${d?.intercompany_docs_by_pk.number ?? ''} · traspaso ${t.insert_transfers_one.number} enviado (stock descontado en origen; la sucursal destino lo recibe en Stock → Traspasos)`)
     } catch (e) { setErr(e instanceof Error ? e.message : 'No se pudo emitir el traspaso') } finally { setBusy(false) }
   }
   const subtotal = items.reduce((a, i) => a + i.qty * i.unit_price, 0), tax = Math.round(subtotal * taxRate) / 100
   const save = async () => {
     const due = new Date(); due.setDate(due.getDate() + f.due)
-    const r = await gql<{ insert_intercompany_docs_one: { number: string } }>(INSERT, { o: { number: `${prefix}-IC-${String(Date.now()).slice(-6)}`, issuer_company_id: issuerId, receiver_company_id: f.receiver_company_id, due_date: due.toISOString().slice(0, 10), concept: f.concept, origin_type: f.origin_type, subtotal, tax, total: subtotal + tax, status: 'emitido', created_by: staffId, intercompany_items: { data: items.filter((i) => i.description).map((i) => ({ description: i.description, qty: i.qty, unit_price: i.unit_price, line_total: Math.round(i.qty * i.unit_price * 100) / 100 })) } } })
+    const doc = await insertNested('intercompany_docs', { number: `${prefix}-IC-${String(Date.now()).slice(-6)}`, issuer_company_id: issuerId, receiver_company_id: f.receiver_company_id, due_date: due.toISOString().slice(0, 10), concept: f.concept, origin_type: f.origin_type, subtotal, tax, total: subtotal + tax, status: 'emitido', created_by: staffId },
+      'intercompany_items', 'doc_id', items.filter((i) => i.description).map((i) => ({ description: i.description, qty: i.qty, unit_price: i.unit_price, line_total: Math.round(i.qty * i.unit_price * 100) / 100 })))
+    const r = { insert_intercompany_docs_one: doc }
     onCreated(r.insert_intercompany_docs_one.number)
   }
   return (

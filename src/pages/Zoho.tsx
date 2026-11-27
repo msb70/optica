@@ -3,17 +3,20 @@ import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { RefreshCw, RotateCcw, CheckCircle2, AlertTriangle, Clock, Ban, BookOpen, Boxes, Users } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, runAll, write } from '../lib/supabase'
 import { Card, PageHeader, Loading, StatusBadge, Tabs, Badge, Empty, Toast, KPI } from '../components/ui'
 import { fdate, ago } from '../lib/format'
 import type { ZohoJob } from '../lib/types'
 
-const Q = `query Zoho($company: uuid!, $status: [String!]) {
-  jobs: zoho_sync_queue(where:{company_id:{_eq:$company}, status:{_in:$status}}, order_by:{created_at:desc}, limit: 100) { id event_type target entity_id idempotency_key status attempts last_error next_retry_at zoho_id created_at processed_at payload }
-  stats: zoho_sync_queue(where:{company_id:{_eq:$company}}) { status target }
-}`
-const RETRY = `mutation Retry($id: uuid!) { update_zoho_sync_queue_by_pk(pk_columns:{id:$id}, _set:{status:"pendiente", next_retry_at:null, last_error:null}) { id } }`
-const DISCARD = `mutation Discard($id: uuid!) { update_zoho_sync_queue_by_pk(pk_columns:{id:$id}, _set:{status:"descartado"}) { id } }`
+async function loadZoho(company: string, status: string[]) {
+  const [jobs, stats] = await Promise.all([
+    run(sb.from('zoho_sync_queue').select('id,event_type,target,entity_id,idempotency_key,status,attempts,last_error,next_retry_at,zoho_id,created_at,processed_at,payload').eq('company_id', company).in('status', status).order('created_at', { ascending: false }).limit(100)),
+    runAll(() => sb.from('zoho_sync_queue').select('status,target').eq('company_id', company)),
+  ])
+  return { jobs: jobs as (ZohoJob & { payload: Record<string, unknown> })[], stats: stats as { status: string; target: string }[] }
+}
+const RETRY = { status: 'pendiente', next_retry_at: null, last_error: null }
+const DISCARD = { status: 'descartado' }
 const TARGET_ICON: Record<string, React.ReactNode> = { books: <BookOpen size={13} />, inventory: <Boxes size={13} />, crm: <Users size={13} /> }
 const EVENT_LABEL: Record<string, string> = { 'sale.completed': 'Venta → Invoice + Payment / Stock', 'customer.created': 'Cliente → Contact', 'quote.created': 'Cotización → Deal / Quote', 'intercompany.invoice': 'Intercompany → Invoice (emisora)', 'intercompany.bill': 'Intercompany → Bill (receptora)' }
 
@@ -22,9 +25,9 @@ export default function Zoho() {
   const [tab, setTab] = useState<'pendiente' | 'error' | 'ok' | 'todos'>('pendiente')
   const [toast, setToast] = useState<string | null>(null)
   const statuses = { pendiente: ['pendiente', 'procesando'], error: ['error'], ok: ['ok'], todos: ['pendiente', 'procesando', 'ok', 'error', 'descartado'] }[tab]
-  const q = useQuery({ queryKey: ['zoho', company?.id, tab], queryFn: () => gql<{ jobs: (ZohoJob & { payload: Record<string, unknown> })[]; stats: { status: string; target: string }[] }>(Q, { company: company!.id, status: statuses }), enabled: !!company, refetchInterval: 15_000 })
+  const q = useQuery({ queryKey: ['zoho', company?.id, tab], queryFn: () => loadZoho(company!.id, statuses), enabled: !!company, refetchInterval: 15_000 })
   const stats = (q.data?.stats ?? []).reduce<Record<string, number>>((a, s) => { a[s.status] = (a[s.status] ?? 0) + 1; return a }, {})
-  const act = async (m: string, id: string, msg: string) => { await gql(m, { id }); setToast(msg); void q.refetch() }
+  const act = async (m: Record<string, unknown>, id: string, msg: string) => { await write(() => sb.from('zoho_sync_queue').update(m).eq('id', id)); setToast(msg); void q.refetch() }
   return (
     <div className="space-y-4">
       <PageHeader title="Sincronización Zoho" subtitle={`${company?.legal_name} · org_id ${company?.zoho_org_id ?? 'sin configurar'} · Books = source of truth contable`} actions={<button className="btn-secondary" onClick={() => q.refetch()}><RefreshCw size={15} className={clsx(q.isFetching && 'animate-spin')} />Actualizar</button>} />

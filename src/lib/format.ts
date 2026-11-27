@@ -17,7 +17,7 @@ export const rxfmt = (v: number | undefined | null, sign = true) => (v === undef
 export const initials = (name: string) => name.split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
 export const fullName = (c?: { first_name?: string; last_name?: string } | null) => (c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() : '—')
 
-export const SOURCES: Record<string, string> = { 'walk-in': 'Walk-in', referido: 'Referido', instagram: 'Instagram', google_ads: 'Google Ads', campania: 'Campaña', empresa: 'Empresa', doctor: 'Doctor', facebook: 'Facebook', web: 'Web' }
+export const SOURCES: Record<string, string> = { 'walk-in': 'Walk-in', referido: 'Referido', instagram: 'Instagram', google_ads: 'Google Ads', campania: 'Campaña', empresa: 'Empresa', doctor: 'Doctor', facebook: 'Facebook', web: 'Web', crm: 'CRM', whatsapp: 'WhatsApp', call_center: 'Call center', formulario_web: 'Formulario web' }
 export const CATEGORIES: Record<string, string> = { armazon: 'Armazón', lente: 'Lentes', lente_contacto: 'Lentes de contacto', solar: 'Solares', accesorio: 'Accesorios', servicio: 'Servicios' }
 export const METHODS: Record<string, string> = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', yappy: 'Yappy', vale: 'Vale', saldo_cliente: 'Saldo cliente', credito: 'Crédito', anticipo: 'Anticipo' }
 export const ROLES: Record<string, string> = { admin: 'Administrador', gerente: 'Gerente', vendedor: 'Vendedor', optometrista: 'Optometrista', cajero: 'Cajero', almacen: 'Almacén' }

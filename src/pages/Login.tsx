@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/auth'
-import { nhost } from '../lib/nhost'
+import { sb } from '../lib/supabase'
 import { Spinner } from '../components/ui'
 
 export default function Login() {
-  const { signIn, signUp } = useAuth()
+  const { signIn } = useAuth()
   const [mode] = useState<'in' | 'up'>('in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,13 +15,13 @@ export default function Login() {
   const forgot = async () => {
     setErr(null); setInfo(null)
     if (!email) { setErr('Escribe tu email y vuelve a pulsar'); return }
-    try { await nhost.auth.sendPasswordResetEmail({ email, options: { redirectTo: `${window.location.origin}/?accion=crear-clave` } }); setInfo('Si el email está dado de alta, recibirás un correo para crear una nueva contraseña.') }
+    try { await sb.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/?accion=crear-clave` }); setInfo('Si el email está dado de alta, recibirás un correo para crear una nueva contraseña.') }
     catch { setInfo('Si el email está dado de alta, recibirás un correo para crear una nueva contraseña.') }
   }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setErr(null)
-    const r = mode === 'in' ? await signIn(email, password) : await signUp(email, password, name)
+    const r = await signIn(email, password)
     setErr(r); setBusy(false)
   }
 
@@ -38,7 +38,7 @@ export default function Login() {
             {[['3', 'compañías'], ['5', 'sucursales'], ['1', 'plataforma']].map(([n, l]) => <div key={l} className="rounded-2xl bg-white/5 border border-white/10 p-3"><div className="text-2xl font-extrabold">{n}</div><div className="text-slate-400 text-xs">{l}</div></div>)}
           </div>
         </div>
-        <div className="relative text-xs text-slate-500">Grupo Optilux · MVP · Nhost + Hasura · Zoho Books / Inventory / CRM</div>
+        <div className="relative text-xs text-slate-500">Grupo Optilux · MVP · Supabase · Zoho Books / Inventory / CRM</div>
       </div>
       <div className="flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm fade-up">

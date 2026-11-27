@@ -4,26 +4,32 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { ShoppingCart, Eye, FileText, CalendarPlus, MessageSquare, Phone, Mail, MapPin, Cake, Receipt, FlaskConical, RotateCcw, Printer } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, write } from '../lib/supabase'
 import { Card, PageHeader, Loading, Badge, Avatar, StatusBadge, Stat, Tabs, Field, Modal } from '../components/ui'
 import RxTable from '../components/RxTable'
 import { money, fdate, fdatetime, SOURCES, fullName, ago } from '../lib/format'
 import type { Customer, Exam, Sale, Quote, LabOrder, Rma, Appointment } from '../lib/types'
 
-const Q = `query Customer360($id: uuid!) {
-  c: customers_by_pk(id:$id) { id code first_name last_name email phone tax_id birth_date gender address source referred_by balance tags notes created_at zoho_contact_id company_id branch_id branch { name } company { legal_name }
-    sales(order_by:{sale_date:desc}) { id number sale_date total paid status delivery_status seller { name } branch { name } sale_items { id description qty line_total category } }
-    exams(order_by:{exam_date:desc}) { id exam_date template reason rx_final rx_final_transposed autorefraction rx_initial diagnosis recommendation next_review_date optometrist { name } branch { name } }
-    quotes(order_by:{created_at:desc}) { id number status total created_at valid_until seller { name } }
-    lab_orders(order_by:{created_at:desc}) { id number status lab_name promised_at created_at lens_type }
-    rmas(order_by:{created_at:desc}) { id number type status reason created_at }
-    appointments(order_by:{scheduled_at:desc}) { id scheduled_at status optometrist { name } }
-    customer_notes(order_by:{created_at:desc}) { id kind body created_at staff { name } }
-  }
-  timeline: v_customer_timeline(where:{customer_id:{_eq:$id}}, order_by:{at:desc}, limit: 60) { kind ref_id at title detail }
-}`
-const NOTE = `mutation Note($o: customer_notes_insert_input!) { insert_customer_notes_one(object:$o) { id } }`
-const APPT = `mutation Appt($o: appointments_insert_input!) { insert_appointments_one(object:$o) { id } }`
+async function loadCustomer(id: string) {
+  const [c, timeline] = await Promise.all([
+    run(sb.from('customers').select(`id,code,first_name,last_name,email,phone,tax_id,birth_date,gender,address,source,referred_by,balance,tags,notes,created_at,zoho_contact_id,company_id,branch_id,
+      marketing_consent,marketing_consent_at,no_comms,branch:branches(name),company:companies(legal_name),
+      sales(id,number,sale_date,total,paid,status,delivery_status,seller:staff!seller_id(name),branch:branches(name),sale_items(id,description,qty,line_total,category)),
+      exams(id,exam_date,template,reason,rx_final,rx_final_transposed,autorefraction,rx_initial,diagnosis,recommendation,next_review_date,optometrist:staff!optometrist_id(name),branch:branches(name)),
+      quotes(id,number,status,total,created_at,valid_until,seller:staff!seller_id(name)),
+      lab_orders(id,number,status,lab_name,promised_at,created_at,lens_type),
+      rmas(id,number,type,status,reason,created_at),
+      appointments(id,scheduled_at,status,optometrist:staff!optometrist_id(name)),
+      customer_notes(id,kind,body,created_at,staff:staff(name))`).eq('id', id)
+      .order('sale_date', { referencedTable: 'sales', ascending: false }).order('exam_date', { referencedTable: 'exams', ascending: false })
+      .order('created_at', { referencedTable: 'quotes', ascending: false }).order('created_at', { referencedTable: 'lab_orders', ascending: false })
+      .order('created_at', { referencedTable: 'rmas', ascending: false }).order('scheduled_at', { referencedTable: 'appointments', ascending: false })
+      .order('created_at', { referencedTable: 'customer_notes', ascending: false })
+      .maybeSingle()),
+    run(sb.from('v_customer_timeline').select('kind,ref_id,at,title,detail').eq('customer_id', id).order('at', { ascending: false }).limit(60)),
+  ])
+  return { c: c as unknown as C, timeline: timeline as unknown as TL[] }
+}
 
 type C = Customer & { branch?: { name: string }; company?: { legal_name: string }; sales: Sale[]; exams: Exam[]; quotes: Quote[]; lab_orders: LabOrder[]; rmas: Rma[]; appointments: Appointment[]; customer_notes: { id: string; kind: string; body: string; created_at: string; staff?: { name: string } }[] }
 type TL = { kind: string; ref_id: string; at: string; title: string; detail: string }
@@ -34,7 +40,7 @@ export default function ClienteDetalle() {
   const { id } = useParams()
   const nav = useNavigate()
   const { me, staff, branch } = useApp()
-  const q = useQuery({ queryKey: ['customer', id], queryFn: () => gql<{ c: C; timeline: TL[] }>(Q, { id }), enabled: !!id })
+  const q = useQuery({ queryKey: ['customer', id], queryFn: () => loadCustomer(id!), enabled: !!id })
   const [tab, setTab] = useState<'timeline' | 'rx' | 'compras' | 'cotizaciones' | 'ordenes' | 'citas'>('timeline')
   const [note, setNote] = useState('')
   const [noteKind, setNoteKind] = useState('nota')
@@ -50,8 +56,8 @@ export default function ClienteDetalle() {
   const rxExpired = lastExam?.next_review_date && lastExam.next_review_date < today
   const age = c.birth_date ? Math.floor((Date.now() - new Date(c.birth_date).getTime()) / 31557600000) : null
 
-  const addNote = async () => { if (!note.trim()) return; await gql(NOTE, { o: { customer_id: c.id, staff_id: me?.id ?? null, kind: noteKind, body: note.trim() } }); setNote(''); void q.refetch() }
-  const addAppt = async () => { await gql(APPT, { o: { company_id: branch?.company_id ?? c.company_id, branch_id: branch?.id ?? c.branch_id, customer_id: c.id, optometrist_id: appt.optometrist_id || null, scheduled_at: `${appt.date}T${appt.time}:00`, source: c.source } }); setApptOpen(false); void q.refetch() }
+  const addNote = async () => { if (!note.trim()) return; await write(() => sb.from('customer_notes').insert({ customer_id: c.id, staff_id: me?.id ?? null, kind: noteKind, body: note.trim() })); setNote(''); void q.refetch() }
+  const addAppt = async () => { await write(() => sb.from('appointments').insert({ company_id: branch?.company_id ?? c.company_id, branch_id: branch?.id ?? c.branch_id, customer_id: c.id, optometrist_id: appt.optometrist_id || null, scheduled_at: new Date(`${appt.date}T${appt.time}:00`).toISOString(), source: c.source })); setApptOpen(false); void q.refetch() }
 
   return (
     <div className="space-y-4">

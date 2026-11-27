@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './lib/auth'
@@ -27,10 +26,9 @@ import CrearClave from './pages/CrearClave'
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000, refetchOnWindowFocus: false } } })
 
 function Gate() {
-  const { isAuthenticated, isLoading } = useAuth()
-  const [settingPassword, setSettingPassword] = useState(() => window.location.pathname === '/crear-clave' || new URLSearchParams(window.location.search).get('accion') === 'crear-clave')
-  if (settingPassword) return <CrearClave onDone={() => setSettingPassword(false)} />
-  if (isLoading) return <Loading label="Conectando con Nhost…" />
+  const { isAuthenticated, isLoading, needsPassword, clearNeedsPassword } = useAuth()
+  if (isLoading) return <Loading label="Conectando…" />
+  if (needsPassword) return <CrearClave onDone={clearNeedsPassword} />
   if (!isAuthenticated) return <Login />
   return <AppProvider><Shell /></AppProvider>
 }

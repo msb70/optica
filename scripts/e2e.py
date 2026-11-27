@@ -12,6 +12,14 @@ async def main():
         b = await p.chromium.launch()
         page = await (await b.new_context(viewport={'width': 1440, 'height': 900}, locale='es-PA')).new_page()
         page.on('pageerror', lambda e: errs.append(str(e)))
+        page.on('response', lambda r: ('supabase.co' in r.url and r.status >= 400) and errs.append(f'{r.status} {r.url[:160]}'))
+        # --- Inicio de sesión (usuario de demostración) ---
+        await page.goto(BASE + '/', wait_until='networkidle')
+        if await page.locator('input[type=password]').count():
+            await page.fill('input[type=email]', 'demo@optilux.test')
+            await page.fill('input[type=password]', 'Optilux2026!')
+            await page.click('button:has-text("Entrar")')
+            await page.wait_for_selector('text=Dashboard', timeout=20000)
         # --- POS ---
         await page.goto(BASE + '/pos', wait_until='networkidle')
         await page.fill('input[placeholder^="Cliente"]', 'Gon')
@@ -30,6 +38,7 @@ async def main():
         await page.click('button:has-text("50%")')
         await page.click('button:has-text("Añadir")')
         await page.click('[role=dialog] button:has-text("Tarjeta")')
+        await page.click('[role=dialog] button:text-is("Visa")')
         await page.click('button:text-is("Todo")')
         await page.click('button:has-text("Añadir")')
         await page.screenshot(path=f'{OUT}/e2e_pos_pay.png')
@@ -86,7 +95,7 @@ async def main():
         await page.select_option('[role=dialog] select', index=3)
         await page.fill('input[placeholder^="Buscar por SKU"]', 'Ray')
         await page.wait_for_timeout(400)
-        await page.locator('.card button').filter(has_text='ARM').first.click()
+        await page.locator('[role=dialog] button').filter(has_text='ARM-').first.click()
         await page.click('button:has-text("Crear borrador")')
         await page.wait_for_timeout(1000)
         await page.locator('button:has-text("Enviar")').first.click()

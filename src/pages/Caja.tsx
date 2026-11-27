@@ -3,22 +3,31 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Lock, Unlock, PlusCircle, MinusCircle, AlertTriangle, Printer, Banknote } from 'lucide-react'
 import { useApp } from '../lib/app'
-import { gql } from '../lib/nhost'
+import { sb, run, write } from '../lib/supabase'
+import { closeCashSession } from '../lib/ops'
 import { Card, PageHeader, Loading, Modal, Field, StatusBadge, Stat, Toast, Badge, Empty } from '../components/ui'
 import { money, fdatetime, fdate, METHODS, ftime } from '../lib/format'
 import type { CashSession } from '../lib/types'
 
-const Q = `query Caja($branch: uuid!) {
-  open: cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"abierta"}}, order_by:{opened_at:desc}, limit:1) { id opened_at opening_amount status notes opener { name }
-    cash_movements(order_by:{created_at:desc}) { id type amount concept created_at }
-    payments(order_by:{created_at:desc}) { id method amount reference created_at sale { number customer { first_name last_name } } }
-    quote_deposits(order_by:{created_at:desc}) { id method amount reference created_at quote { number customer { first_name last_name } } } }
-  history: cash_sessions(where:{branch_id:{_eq:$branch}, status:{_eq:"cerrada"}}, order_by:{opened_at:desc}, limit:30) { id opened_at closed_at opening_amount expected_cash counted_cash difference status notes opener { name } closer { name }
-    payments_aggregate { aggregate { sum { amount } count } } }
-}`
-const OPEN = `mutation Open($o: cash_sessions_insert_input!) { insert_cash_sessions_one(object:$o) { id } }`
-const CLOSE = `mutation Close($id: uuid!, $counted: numeric!, $staff: uuid, $notes: String) { close_cash_session(args:{p_session_id:$id, p_counted:$counted, p_staff_id:$staff, p_notes:$notes}) { id difference expected_cash } }`
-const MOVE = `mutation Move($o: cash_movements_insert_input!) { insert_cash_movements_one(object:$o) { id } }`
+async function loadCaja(branch: string) {
+  const [open, history] = await Promise.all([
+    run(sb.from('cash_sessions').select(`id,opened_at,opening_amount,status,notes,opener:staff!opened_by(name),
+      cash_movements(id,type,amount,concept,created_at),
+      payments(id,method,amount,reference,created_at,sale:sales(number,customer:customers(first_name,last_name))),
+      quote_deposits(id,method,amount,reference,created_at,quote:quotes(number,customer:customers(first_name,last_name)))`)
+      .eq('branch_id', branch).eq('status', 'abierta').order('opened_at', { ascending: false }).limit(1)
+      .order('created_at', { referencedTable: 'cash_movements', ascending: false })
+      .order('created_at', { referencedTable: 'payments', ascending: false })
+      .order('created_at', { referencedTable: 'quote_deposits', ascending: false })),
+    run(sb.from('cash_sessions').select('id,opened_at,closed_at,opening_amount,expected_cash,counted_cash,difference,status,notes,opener:staff!opened_by(name),closer:staff!closed_by(name),payments(sum:amount.sum(),count:id.count())')
+      .eq('branch_id', branch).eq('status', 'cerrada').order('opened_at', { ascending: false }).limit(30)),
+  ])
+  type H = Hist & { payments: { sum: number | null; count: number }[] }
+  return {
+    open: open as unknown as Open[],
+    history: (history as unknown as H[]).map(({ payments, ...h }) => ({ ...h, payments_aggregate: { aggregate: { sum: { amount: payments?.[0]?.sum ?? null }, count: Number(payments?.[0]?.count ?? 0) } } })) as Hist[],
+  }
+}
 
 type OpenPayment = { id: string; method: string; amount: number; reference?: string; created_at: string; sale?: { number: string; customer?: { first_name: string; last_name: string } } }
 type Open = Omit<CashSession, 'payments'> & { payments: OpenPayment[]; quote_deposits?: { id: string; method: string; amount: number; reference?: string; created_at: string; quote?: { number: string; customer?: { first_name: string; last_name: string } } }[] }
@@ -27,7 +36,7 @@ type Hist = CashSession & { closer?: { name: string }; payments_aggregate: { agg
 export default function Caja() {
   const { company, branch, me, refreshCash, currency } = useApp()
   const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['caja', branch?.id], queryFn: () => gql<{ open: Open[]; history: Hist[] }>(Q, { branch: branch!.id }), enabled: !!branch, refetchInterval: 20_000 })
+  const q = useQuery({ queryKey: ['caja', branch?.id], queryFn: () => loadCaja(branch!.id), enabled: !!branch, refetchInterval: 20_000 })
   const [openModal, setOpenModal] = useState(false)
   const [closeModal, setCloseModal] = useState(false)
   const [moveModal, setMoveModal] = useState<'ingreso' | 'egreso' | null>(null)
@@ -49,9 +58,9 @@ export default function Caja() {
   const expected = Number(s?.opening_amount ?? 0) + (byMethod.efectivo ?? 0) + ingresos - egresos
   const totalSales = Object.values(byMethod).reduce((a, b) => a + b, 0)
 
-  const doOpen = async () => { await gql(OPEN, { o: { company_id: company!.id, branch_id: branch!.id, opened_by: me?.id ?? null, opening_amount: opening } }); setOpenModal(false); setToast('Caja abierta'); refresh() }
-  const doClose = async () => { const r = await gql<{ close_cash_session: { difference: number }[] }>(CLOSE, { id: s!.id, counted, staff: me?.id ?? null, notes: notes || null }); setCloseModal(false); const d = Number(r.close_cash_session[0].difference); setToast(d === 0 ? 'Caja cerrada · cuadre perfecto' : `Caja cerrada con diferencia de ${currency(d)}`); refresh() }
-  const doMove = async () => { await gql(MOVE, { o: { cash_session_id: s!.id, type: moveModal, amount: mv.amount, concept: mv.concept, staff_id: me?.id ?? null } }); setMoveModal(null); setMv({ amount: 0, concept: '' }); refresh() }
+  const doOpen = async () => { await write(() => sb.from('cash_sessions').insert({ company_id: company!.id, branch_id: branch!.id, opened_by: me?.id ?? null, opening_amount: opening })); setOpenModal(false); setToast('Caja abierta'); refresh() }
+  const doClose = async () => { const r = await closeCashSession(s!.id, counted, me?.id ?? null, notes || null); setCloseModal(false); const d = Number(r[0].difference); setToast(d === 0 ? 'Caja cerrada · cuadre perfecto' : `Caja cerrada con diferencia de ${currency(d)}`); refresh() }
+  const doMove = async () => { await write(() => sb.from('cash_movements').insert({ cash_session_id: s!.id, type: moveModal, amount: mv.amount, concept: mv.concept, staff_id: me?.id ?? null })); setMoveModal(null); setMv({ amount: 0, concept: '' }); refresh() }
 
   return (
     <div className="space-y-5">

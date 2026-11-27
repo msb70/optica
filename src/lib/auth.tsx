@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { nhost, isDevMode } from './nhost'
+import { sb } from './supabase'
 
 type User = { id: string; email?: string | null; displayName?: string | null } | null
 
@@ -7,63 +7,51 @@ interface AuthCtx {
   user: User
   isAuthenticated: boolean
   isLoading: boolean
+  /** true cuando se entró desde un enlace de invitación o de recuperar contraseña */
+  needsPassword: boolean
+  clearNeedsPassword: () => void
   signIn: (email: string, password: string) => Promise<string | null>
-  signUp: (email: string, password: string, displayName: string) => Promise<string | null>
   signOut: () => Promise<void>
 }
 
 const Ctx = createContext<AuthCtx | null>(null)
 
+const toUser = (u: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null | undefined): User =>
+  u ? { id: u.id, email: u.email, displayName: (u.user_metadata?.name as string) ?? null } : null
+
+const AUTH_MSG: Record<string, string> = {
+  'Invalid login credentials': 'Email o contraseña incorrectos',
+  'Email not confirmed': 'Tu cuenta aún no está confirmada. Usa el enlace de invitación del correo.',
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null)
   const [isLoading, setLoading] = useState(true)
+  // los enlaces de invitación/recuperación traen type=invite|recovery en el fragmento de la URL
+  const [needsPassword, setNeedsPassword] = useState(() => /type=(invite|recovery)/.test(window.location.hash) || new URLSearchParams(window.location.search).get('accion') === 'crear-clave')
 
   useEffect(() => {
-    if (isDevMode) {
-      setUser({ id: 'dev', email: 'dev@optilux.local', displayName: 'Desarrollador' })
-      setLoading(false)
-      return
-    }
-    const s = nhost.getUserSession()
-    setUser(s?.user ? { id: s.user.id, email: s.user.email, displayName: s.user.displayName } : null)
-    setLoading(false)
-    return nhost.sessionStorage.onChange((s) => {
-      setUser(s?.user ? { id: s.user.id, email: s.user.email, displayName: s.user.displayName } : null)
+    sb.auth.getSession().then(({ data }) => { setUser(toUser(data.session?.user)); setLoading(false) })
+    const { data } = sb.auth.onAuthStateChange((event, session) => {
+      setUser(toUser(session?.user))
+      if (event === 'PASSWORD_RECOVERY') setNeedsPassword(true)
     })
+    return () => data.subscription.unsubscribe()
   }, [])
-
-  const errMsg = (e: unknown) => {
-    const err = e as { message?: string; body?: { message?: string } }
-    return err?.body?.message || err?.message || 'Error de autenticación'
-  }
 
   const value: AuthCtx = {
     user,
     isAuthenticated: !!user,
     isLoading,
+    needsPassword,
+    clearNeedsPassword: () => setNeedsPassword(false),
     signIn: async (email, password) => {
-      try {
-        const r = await nhost.auth.signInEmailPassword({ email, password })
-        if (!r.body?.session) return 'Credenciales inválidas'
-        return null
-      } catch (e) { return errMsg(e) }
-    },
-    signUp: async (email, password, displayName) => {
-      try {
-        const r = await nhost.auth.signUpEmailPassword({ email, password, options: { displayName, locale: 'es' } })
-        if (!r.body?.session) return 'Cuenta creada. Revisa tu correo para verificarla e inicia sesión.'
-        return null
-      } catch (e) { return errMsg(e) }
+      const { error } = await sb.auth.signInWithPassword({ email, password })
+      return error ? AUTH_MSG[error.message] ?? error.message : null
     },
     signOut: async () => {
-      if (isDevMode) return
-      try {
-        await nhost.auth.signOut({ refreshToken: nhost.getUserSession()?.refreshToken ?? '' })
-      } catch {
-        // Permite salir de una sesión caducada incluso si Auth no responde.
-      } finally {
-        nhost.clearSession()
-      }
+      // local: permite salir aunque la sesión ya haya caducado en el servidor
+      await sb.auth.signOut({ scope: 'local' })
     },
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
